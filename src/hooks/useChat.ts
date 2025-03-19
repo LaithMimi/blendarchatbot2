@@ -162,6 +162,45 @@ export const useChat = () => {
     // Save preferences to localStorage
     localStorage.setItem('userPreferences', JSON.stringify(preferences));
   };
+
+  // Add a limit reached message to the chat
+  const addLimitReachedMessage = () => {
+    const limitMessage = {
+      id: Date.now().toString(),
+      content: "You've reached the limit of free messages for today. Upgrade to Premium for unlimited messages and additional features. Click the button below to upgrade and continue your Arabic learning journey without interruptions.",
+      isUser: false,
+      timestamp: new Date()
+    };
+    
+    setMessages(prev => [...prev, limitMessage]);
+    
+    // Save the limit message to local storage
+    const localChats = JSON.parse(localStorage.getItem('chatHistory') || '[]');
+    const userEmail = currentUser || userPreferences.name;
+    const userIdEncoded = safeEncode(userEmail);
+    
+    // Check if we already have a chat for this user
+    const existingSessionIndex = localChats.findIndex((chat: any) => 
+      chat.userId === userIdEncoded
+    );
+    
+    if (existingSessionIndex >= 0) {
+      // Add to existing session
+      if (!localChats[existingSessionIndex].messages) {
+        localChats[existingSessionIndex].messages = [];
+      }
+      
+      // Add bot response
+      localChats[existingSessionIndex].messages.push({
+        id: limitMessage.id,
+        text: limitMessage.content,
+        sender: 'bot',
+        timestamp: limitMessage.timestamp
+      });
+      
+      localStorage.setItem('chatHistory', JSON.stringify(localChats));
+    }
+  };
   
   const handleSendMessage = async (content: string) => {
     if (!content.trim()) return;
@@ -175,6 +214,9 @@ export const useChat = () => {
         description: "You've reached the maximum messages for the free plan. Please upgrade to premium for unlimited messages.",
         variant: "destructive"
       });
+      
+      // Add a message in the chat about the limit
+      addLimitReachedMessage();
       return;
     }
     
@@ -285,6 +327,31 @@ export const useChat = () => {
       }
       
       localStorage.setItem('chatHistory', JSON.stringify(localChats));
+      
+      // Check if user is approaching the limit
+      if (newCount === Math.floor(maxMessages * 0.8)) {
+        // Add a warning message about approaching the limit
+        const warningMessage: Message = {
+          id: Date.now().toString(),
+          content: `You're approaching your free message limit (${newCount}/${maxMessages}). Consider upgrading to Premium for unlimited messages.`,
+          isUser: false,
+          timestamp: new Date()
+        };
+        
+        setMessages(prev => [...prev, warningMessage]);
+        
+        // Add the warning message to local storage as well
+        if (existingSessionIndex >= 0) {
+          localChats[existingSessionIndex].messages.push({
+            id: warningMessage.id,
+            text: warningMessage.content,
+            sender: 'bot',
+            timestamp: warningMessage.timestamp
+          });
+          
+          localStorage.setItem('chatHistory', JSON.stringify(localChats));
+        }
+      }
       
     } catch (error) {
       console.error('Error getting response from backend:', error);

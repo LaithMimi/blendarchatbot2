@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import SubscriptionCard from '@/components/SubscriptionCard';
-import { Star, Shield, Zap, BadgeDollarSign, Loader2 } from 'lucide-react';
+import { Star, Shield, Zap, BadgeDollarSign, Loader2, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -201,88 +201,98 @@ const Subscription: React.FC = () => {
     return Math.max(0, diffDays);
   };
 
-  // Subscription info component
-  const SubscriptionInfo = () => {
-    if (isLoadingSubscription) {
-      return (
-        <div className="flex justify-center items-center my-8 p-6">
-          <Loader2 className="h-8 w-8 animate-spin text-brand-bordeaux" />
-        </div>
-      );
-    }
-    
-    if (!subscription) {
-      return null;
-    }
-    
+  // Enhanced SubscriptionInfo component with more prominent cancel button
+
+const SubscriptionInfo = () => {
+  if (isLoadingSubscription) {
     return (
-      <motion.div 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }}
-        className="bg-white/80 dark:bg-black/20 backdrop-blur-sm p-6 rounded-xl border border-brand-bordeaux/20 mb-12 max-w-2xl mx-auto"
-      >
-        <div className="flex items-center gap-3 mb-4">
-          {subscription.plan === 'premium' ? (
-            <Star className="h-6 w-6 text-brand-yellow" />
-          ) : (
-            <BadgeDollarSign className="h-6 w-6 text-brand-bordeaux" />
-          )}
-          <h3 className="text-xl font-bold">
-            Current Subscription: {subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)}
-          </h3>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <p className="text-sm text-muted-foreground">Status</p>
-            <p className={`font-medium ${isActive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-              {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
-            </p>
-          </div>
-          
-          <div>
-            <p className="text-sm text-muted-foreground">Billing Cycle</p>
-            <p className="font-medium">
-              {subscription.billingCycle.charAt(0).toUpperCase() + subscription.billingCycle.slice(1)}
-            </p>
-          </div>
-          
-          <div>
-            <p className="text-sm text-muted-foreground">Started On</p>
-            <p className="font-medium">{formatDate(subscription.startDate)}</p>
-          </div>
-          
-          <div>
-            <p className="text-sm text-muted-foreground">Expires On</p>
-            <p className="font-medium">{formatDate(subscription.endDate)}</p>
-          </div>
-        </div>
-        
-        {isActive && (
-          <div className="mt-4 p-3 bg-brand-yellow/20 rounded-lg">
-            <p className="text-sm text-brand-darkGray">
-              {subscription.autoRenew 
-                ? `Your subscription will automatically renew ${subscription.billingCycle === 'monthly' ? 'each month' : 'annually'}.` 
-                : `Your subscription will expire in ${getRemainingDays()} days.`}
-            </p>
-          </div>
+      <div className="flex justify-center items-center my-8 p-6">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-bordeaux" />
+      </div>
+    );
+  }
+  
+  if (!subscription) {
+    return null;
+  }
+  
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }}
+      className="bg-white/80 dark:bg-black/20 backdrop-blur-sm p-6 rounded-xl border border-brand-bordeaux/20 mb-12 max-w-2xl mx-auto"
+    >
+      <div className="flex items-center gap-3 mb-4">
+        {subscription.plan === 'premium' ? (
+          <Star className="h-6 w-6 text-brand-yellow" />
+        ) : (
+          <BadgeDollarSign className="h-6 w-6 text-brand-bordeaux" />
         )}
+        <h3 className="text-xl font-bold">
+          Current Subscription: {subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)}
+        </h3>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <p className="text-sm text-muted-foreground">Status</p>
+          <p className={`font-medium ${isActive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+            {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
+          </p>
+        </div>
         
-        {isActive && subscription.plan !== 'basic' && (
-          <div className="mt-6">
+        <div>
+          <p className="text-sm text-muted-foreground">Billing Cycle</p>
+          <p className="font-medium">
+            {subscription.billingCycle.charAt(0).toUpperCase() + subscription.billingCycle.slice(1)}
+          </p>
+        </div>
+        
+        <div>
+          <p className="text-sm text-muted-foreground">Started On</p>
+          <p className="font-medium">{formatDate(subscription.startDate)}</p>
+        </div>
+        
+        <div>
+          <p className="text-sm text-muted-foreground">Expires On</p>
+          <p className="font-medium">{formatDate(subscription.endDate)}</p>
+        </div>
+      </div>
+      
+      {isActive && (
+        <div className="mt-4 p-3 bg-brand-yellow/20 rounded-lg">
+          <p className="text-sm text-brand-darkGray">
+            {subscription.autoRenew 
+              ? `Your subscription will automatically renew ${subscription.billingCycle === 'monthly' ? 'each month' : 'annually'}.` 
+              : `Your subscription will expire in ${getRemainingDays()} days.`}
+          </p>
+        </div>
+      )}
+      
+      {isActive && subscription.plan !== 'basic' && (
+        <div className="mt-8 border-t pt-6 border-brand-bordeaux/10">
+          <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
+            <div>
+              <h4 className="font-medium text-lg mb-1">Manage Subscription</h4>
+              <p className="text-sm text-muted-foreground">
+                You can cancel your subscription at any time. You'll retain access until {formatDate(subscription.endDate)}.
+              </p>
+            </div>
+            
             <Button 
               variant="outline" 
-              className="text-red-600 border-red-600 hover:bg-red-50"
+              className="text-red-600 border-red-600 hover:bg-red-50 hover:border-red-800 px-6 py-2 font-medium flex items-center gap-2"
               onClick={() => setShowCancelDialog(true)}
             >
+              <XCircle size={18} />
               Cancel Subscription
             </Button>
           </div>
-        )}
-      </motion.div>
-    );
-  };
-
+        </div>
+      )}
+    </motion.div>
+  );
+};
   return (
     <div className="min-h-screen py-16 px-4 sm:px-6 lg:px-8 bg-brand-background dark:bg-brand-darkGray">
       {/* Decorative background elements */}
