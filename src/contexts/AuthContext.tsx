@@ -26,6 +26,7 @@ interface AuthContextType {
   userName: string;
   authToken: string | null;
   isAuthenticated: boolean;
+  isPremium: boolean;
   setEmail: (email: string) => void;
   setUserName: (name: string) => void;
   setIsAuthenticated: (auth: boolean) => void;
@@ -35,6 +36,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   devLogin: () => Promise<boolean>;
   emailLinkSent: boolean;
+  checkSubscriptionStatus: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -82,6 +84,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userName, setUserName] = useState("");
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
   const [devMode, setDevMode] = useState(false);
   const [emailLinkSent, setEmailLinkSent] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -99,7 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [auth]);
 
   // Observe auth state
-  useEffect(() => {
+   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
@@ -138,6 +141,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               updatedAt: new Date().toISOString()
             });
           }
+          
+          // Check subscription status
+          await checkSubscriptionStatus();
 
         } catch (error) {
           console.error("Error in onAuthStateChanged:", error);
@@ -159,6 +165,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setDevMode(false);
     setEmailLinkSent(false);
     setUserId(null);
+    setIsPremium(false);
 
     Cookies.remove("authToken");
     removeSessionItem("authToken");
@@ -212,6 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthToken("dev_token_for_testing");
     setDevMode(true);
     setUserId(devUserId);
+    setIsPremium(true); // Dev mode gets premium access
 
     Cookies.set("authToken", "dev_token_for_testing", { secure: true, sameSite: "strict" });
     setSessionItem("authToken", "dev_token_for_testing");
@@ -262,7 +270,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     devLogin,
     emailLinkSent
   };
-
+// Check subscription status
+  const checkSubscriptionStatus = async (): Promise<boolean> => {
+    if (!userId) return false;
+    
+    try {
+      // First check user document for isPremium flag
+      const userRef = doc(firestore, "users", userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        
+        // Check if user has isPremium flag
+        if (userData.isPremium === true) {
+          // Verify subscription is still active
+          const subscriptionRef = doc(firestore, "subscriptions", userId);
+          const subscriptionDoc = await getDoc(subscriptionRef);
+          
+          if (subscriptionDoc.exists()) {
+            const subscriptionData = subscriptionDoc.data();
+            
+            // Check if subscription is active and not expired
+            if (
+              (subscriptionData.status === 'active' || subscriptionData.status === 'trial') &&
+              new Date(subscriptionData.endDate) > new Date()
+            ) {
+              setIsPremium(true);
+              return true;
+            }
+          }
+          
+          // If we get here, subscription is not active or has expired
+          // Update user document to reflect this
+          await updateDoc(userRef, {
+            isPremium: false,
+            updatedAt: new Date().toISOString()
+          });
+        }
+        
+        setIsPremium(false);
+        return false;
+      }
+      
+      setIsPremium(false);
+      return false;
+    } catch (error) {
+      console.error('Error checking subscription status:', error);
+      setIsPremium(false);
+      return false;
+    }
+  };
   return (
     <AuthContext.Provider value={contextValue}>
       {children}

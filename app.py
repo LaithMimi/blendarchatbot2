@@ -2,7 +2,11 @@ import os
 import logging
 import uuid
 import traceback
-from datetime import datetime, timezone
+import requests
+import json
+import hashlib
+import hmac
+from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -52,6 +56,24 @@ try:
 except Exception as e:
     logger.error(f"❌ OpenAI client initialization failed: {e}")
     client = None
+
+# ------------------------------
+# Meshulam API Configuration
+# ------------------------------
+MESHULAM_API_URL = os.getenv("MESHULAM_API_URL", "https://sandbox.meshulam.co.il/api/light/server")
+MESHULAM_USER_ID = os.getenv("MESHULAM_USER_ID")
+MESHULAM_API_KEY = os.getenv("MESHULAM_API_KEY")
+MESHULAM_PAGE_CODE = os.getenv("MESHULAM_PAGE_CODE")
+
+# Helper to generate Meshulam API signature
+def generate_meshulam_signature(data):
+    data_string = json.dumps(data, separators=(',', ':'))
+    signature = hmac.new(
+        MESHULAM_API_KEY.encode(),
+        data_string.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return signature
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='./build', static_url_path='')
@@ -232,6 +254,67 @@ def safe_get_materials(level, week):
         logger.error(f"❌ Error fetching materials: {e}", exc_info=True)
         return []
 
+# Check if user has an active subscription
+def check_subscription_status(user_id):
+    """Verify if a user has an active subscription"""
+    if not firebase_initialized or not db:
+        logger.warning("⚠ Firebase not initialized, skipping subscription check")
+        return False
+    
+    try:
+        # First check user document for isPremium flag
+        user_ref = db.collection("users").document(user_id).get()
+        
+        if not user_ref.exists:
+            return False
+            
+        user_data = user_ref.to_dict()
+        
+        # Quick check on isPremium flag
+        if not user_data.get("isPremium", False):
+            return False
+            
+        # Verify with subscription document
+        subscription_ref = db.collection("subscriptions").document(user_id).get()
+        
+        if not subscription_ref.exists:
+            # Update user document to reflect no subscription
+            db.collection("users").document(user_id).update({
+                "isPremium": False,
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            return False
+            
+        subscription_data = subscription_ref.to_dict()
+        
+        # Check if subscription is active and not expired
+        if subscription_data.get("status") not in ["active", "trial"]:
+            return False
+            
+        # Check expiration date
+        end_date = datetime.fromisoformat(subscription_data.get("endDate", "2000-01-01"))
+        if end_date <= datetime.now(timezone.utc):
+            # Subscription expired, update status
+            db.collection("subscriptions").document(user_id).update({
+                "status": "expired",
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Update user document
+            db.collection("users").document(user_id).update({
+                "isPremium": False,
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            return False
+            
+        # Valid subscription found
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error checking subscription status: {e}", exc_info=True)
+        return False
+
 # (7) Ask Endpoint
 @app.route('/ask', methods=['POST'])
 def ask():
@@ -282,13 +365,18 @@ def ask():
             }
             safe_firestore_set("users", user_id, user_data)
 
+        # Check if user has premium access
+        has_premium = check_subscription_status(user_id)
+        
         # (12) Usage Limiter for non-premium users
-        if not user_data.get("isPremium", False):
+        if not has_premium:
             current_month = datetime.now().strftime("%m_%y")
             total_messages = user_data.get("totalMessages", {}).get(current_month, 0)
+            
+            # If not premium and beyond limit, stop here
             if total_messages >= 50:
                 limit_message = {
-                    "answer": "You have reached your monthly limit of 50 messages. Please upgrade to premium.",
+                    "answer": "You have reached your monthly limit of 50 messages. Please upgrade to premium for unlimited access.",
                     "_id": session_id,
                     "sessionId": session_id,
                     "isSubscriptionLimit": True,
@@ -296,7 +384,7 @@ def ask():
                 }
                 return jsonify(limit_message), 200
 
-            # Update message count
+            # Update message count for free users
             safe_firestore_set(
                 "users",
                 user_id,
@@ -494,6 +582,581 @@ def delete_all_chatlogs():
     except Exception as e:
         logger.error(f"Error deleting all chat logs: {e}", exc_info=True)
         return jsonify({"error": "Failed to delete all chat logs", "message": str(e)}), 500
+
+# (11) Create Subscription Payment
+@app.route('/api/subscription/create-payment', methods=['POST'])
+def create_subscription_payment():
+    try:
+        # Verify authentication
+        user_id, error = verify_token()
+        if error:
+            logger.warning(f"🔒 Authentication error: {error}")
+            return jsonify({"error": error, "status": 0}), 401
+            
+        # Get request data
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided", "status": 0}), 400
+            
+        # Verify user matches the token
+        if user_id != data.get('userId'):
+            return jsonify({"error": "User ID mismatch", "status": 0}), 403
+            
+        # Build Meshulam API request
+        payment_data = {
+            "userId": MESHULAM_USER_ID,
+            "pageCode": data.get('pageCode') or MESHULAM_PAGE_CODE,
+            "sum": data.get('sum'),
+            "paymentType": data.get('paymentType', 'regular'),
+            "description": data.get('description', 'Blend.Ar Subscription'),
+            "paymentNum": 1,
+            "maxPayments": data.get('maxPayments', 1),
+            "customerEmail": data.get('email'),
+            "successUrl": data.get('successUrl'),
+            "cancelUrl": data.get('cancelUrl'),
+            "cField1": user_id,  # Store our user ID in custom field
+        }
+        
+        # Add customer details if provided
+        if data.get('firstName'):
+            payment_data["customerName"] = data.get('firstName')
+        if data.get('lastName'):
+            payment_data["customerLName"] = data.get('lastName')
+        if data.get('phone'):
+            payment_data["customerPhone"] = data.get('phone')
+            
+        # Add signature
+        payment_data["apiKey"] = generate_meshulam_signature(payment_data)
+        
+        # Call Meshulam API
+        response = requests.post(
+            f"{MESHULAM_API_URL}/createPaymentProcess",
+            json=payment_data
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"❌ Meshulam API error: {response.text}")
+            return jsonify({
+                "status": 0,
+                "message": "Payment gateway error",
+                "data": {}
+            }), 500
+            
+        result = response.json()
+        
+        # Store transaction info in Firestore
+        if result.get('status') == 1:
+            transaction_data = {
+                "userId": user_id,
+                "transactionId": result.get('data', {}).get('transactionId'),
+                "status": "pending",
+                "amount": data.get('sum'),
+                "plan": data.get('description'),
+                "createdAt": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Save to Firestore
+            db.collection("payments").document(transaction_data["transactionId"]).set(transaction_data)
+            
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating subscription payment: {e}", exc_info=True)
+        return jsonify({
+            "status": 0,
+            "message": f"Error: {str(e)}",
+            "data": {}
+        }), 500
+
+# (12) Verify Payment
+@app.route('/api/subscription/verify-payment', methods=['POST'])
+def verify_payment():
+    try:
+        # Verify authentication
+        user_id, error = verify_token()
+        if error:
+            logger.warning(f"🔒 Authentication error: {error}")
+            return jsonify({"error": error, "status": 0}), 401
+            
+        # Get request data
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided", "status": 0}), 400
+            
+        transaction_id = data.get('transactionId')
+        if not transaction_id:
+            return jsonify({"error": "Transaction ID is required", "status": 0}), 400
+            
+        # Build Meshulam verification request
+        verification_data = {
+            "userId": MESHULAM_USER_ID,
+            "transactionId": transaction_id
+        }
+        
+        # Add signature
+        verification_data["apiKey"] = generate_meshulam_signature(verification_data)
+        
+        # Call Meshulam API
+        response = requests.post(
+            f"{MESHULAM_API_URL}/getTransactionDetails",
+            json=verification_data
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"❌ Meshulam API error: {response.text}")
+            return jsonify({
+                "status": 0,
+                "message": "Payment verification error",
+                "data": {}
+            }), 500
+            
+        result = response.json()
+        
+        # If payment was successful
+        if result.get('status') == 1 and result.get('data', {}).get('statusCode') == 1:
+            # Update transaction in Firestore
+            payment_ref = db.collection("payments").document(transaction_id)
+            payment_ref.update({
+                "status": "completed",
+                "meshulam_data": result.get('data'),
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Update user subscription data
+            user_data = db.collection("users").document(user_id).get().to_dict()
+            
+            # Calculate subscription end date based on plan
+            payment_details = db.collection("payments").document(transaction_id).get().to_dict()
+            
+            # Check if monthly or yearly from description
+            is_yearly = "yearly" in payment_details.get("plan", "").lower()
+            
+            # Set subscription end date
+            end_date = datetime.now(timezone.utc)
+            if is_yearly:
+                end_date += timedelta(days=365)
+            else:
+                end_date += timedelta(days=30)
+                
+            # Update user and subscription
+            db.collection("users").document(user_id).update({
+                "isPremium": True,
+                "subscriptionStatus": "active",
+                "subscriptionEndDate": end_date.isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Create or update subscription record
+            subscription_ref = db.collection("subscriptions").document(user_id)
+            subscription_doc = subscription_ref.get()
+            
+            if subscription_doc.exists:
+                subscription_ref.update({
+                    "status": "active",
+                    "plan": "premium",
+                    "billingCycle": "yearly" if is_yearly else "monthly",
+                    "endDate": end_date.isoformat(),
+                    "autoRenew": True,
+                    "transactionId": transaction_id,
+                    "paymentMethod": "meshulam",
+                    "updatedAt": datetime.now(timezone.utc).isoformat(),
+                    "meshulam.customerId": result.get('data', {}).get('customer_id'),
+                    "meshulam.recurringTransactionId": result.get('data', {}).get('recurring_transaction_id')
+                })
+            else:
+                subscription_data = {
+                    "userId": user_id,
+                    "plan": "premium",
+                    "billingCycle": "yearly" if is_yearly else "monthly",
+                    "status": "active",
+                    "startDate": datetime.now(timezone.utc).isoformat(),
+                    "endDate": end_date.isoformat(),
+                    "autoRenew": True,
+                    "transactionId": transaction_id,
+                    "paymentMethod": "meshulam",
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                    "updatedAt": datetime.now(timezone.utc).isoformat(),
+                    "meshulam": {
+                        "customerId": result.get('data', {}).get('customer_id'),
+                        "recurringTransactionId": result.get('data', {}).get('recurring_transaction_id')
+                    }
+                }
+                subscription_ref.set(subscription_data)
+            
+            return jsonify({
+                "status": 1,
+                "message": "Payment verified successfully",
+                "data": {
+                    "customerId": result.get('data', {}).get('customer_id'),
+                    "recurringTransactionId": result.get('data', {}).get('recurring_transaction_id')
+                }
+            }), 200
+            
+        else:
+            # Payment failed or pending
+            return jsonify({
+                "status": 0,
+                "message": "Payment verification failed",
+                "data": result.get('data', {})
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"❌ Error verifying payment: {e}", exc_info=True)
+        return jsonify({
+            "status": 0,
+            "message": f"Error: {str(e)}",
+            "data": {}
+        }), 500
+
+# (13) Cancel Subscription
+@app.route('/api/subscription/cancel', methods=['POST'])
+def cancel_subscription():
+    try:
+        # Verify authentication
+        user_id, error = verify_token()
+        if error:
+            logger.warning(f"🔒 Authentication error: {error}")
+            return jsonify({"error": error, "status": 0}), 401
+            
+        # Get request data
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided", "status": 0}), 400
+            
+        # Verify user matches the token
+        if user_id != data.get('userId'):
+            return jsonify({"error": "User ID mismatch", "status": 0}), 403
+            
+        recurring_transaction_id = data.get('recurringTransactionId')
+        if not recurring_transaction_id:
+            # No recurring transaction to cancel, just update the database
+            db.collection("users").document(user_id).update({
+                "isPremium": False,
+                "subscriptionStatus": "cancelled",
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Get subscription doc
+            subscription_ref = db.collection("subscriptions").document(user_id)
+            subscription_doc = subscription_ref.get()
+            
+            if subscription_doc.exists:
+                subscription_ref.update({
+                    "status": "cancelled",
+                    "autoRenew": False,
+                    "updatedAt": datetime.now(timezone.utc).isoformat()
+                })
+                
+            return jsonify({
+                "status": 1,
+                "message": "Subscription cancelled",
+                "data": {}
+            }), 200
+        
+        # Build Meshulam cancel request
+        cancel_data = {
+            "userId": MESHULAM_USER_ID,
+            "recurringTransactionId": recurring_transaction_id
+        }
+        
+        # Add signature
+        cancel_data["apiKey"] = generate_meshulam_signature(cancel_data)
+        
+        # Call Meshulam API
+        response = requests.post(
+            f"{MESHULAM_API_URL}/stopRecurringTransaction",
+            json=cancel_data
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"❌ Meshulam API error: {response.text}")
+            return jsonify({
+                "status": 0,
+                "message": "Cancellation error",
+                "data": {}
+            }), 500
+            
+        result = response.json()
+        
+        # Update subscription status in Firestore
+        if result.get('status') == 1:
+            # Update user data
+            db.collection("users").document(user_id).update({
+                "isPremium": False,
+                "subscriptionStatus": "cancelled",
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Get subscription doc
+            subscription_ref = db.collection("subscriptions").document(user_id)
+            subscription_doc = subscription_ref.get()
+            
+            if subscription_doc.exists:
+                subscription_ref.update({
+                    "status": "cancelled",
+                    "autoRenew": False,
+                    "updatedAt": datetime.now(timezone.utc).isoformat()
+                })
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error cancelling subscription: {e}", exc_info=True)
+        return jsonify({
+            "status": 0,
+            "message": f"Error: {str(e)}",
+            "data": {}
+        }), 500
+
+# (14) Change Subscription Plan
+@app.route('/api/subscription/change-plan', methods=['POST'])
+def change_subscription_plan():
+    try:
+        # Verify authentication
+        user_id, error = verify_token()
+        if error:
+            logger.warning(f"🔒 Authentication error: {error}")
+            return jsonify({"error": error, "status": 0}), 401
+            
+        # Get request data
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided", "status": 0}), 400
+            
+        # Verify user matches the token
+        if user_id != data.get('userId'):
+            return jsonify({"error": "User ID mismatch", "status": 0}), 403
+            
+        # Get plan details
+        current_plan = data.get('currentPlan')
+        current_billing_cycle = data.get('currentBillingCycle')
+        new_plan = data.get('newPlan')
+        new_billing_cycle = data.get('newBillingCycle')
+        recurring_transaction_id = data.get('recurringTransactionId')
+        
+        # If downgrading to free plan
+        if new_plan == 'basic':
+            # Cancel any existing subscription
+            if recurring_transaction_id:
+                cancel_data = {
+                    "userId": MESHULAM_USER_ID,
+                    "recurringTransactionId": recurring_transaction_id
+                }
+                
+                # Add signature
+                cancel_data["apiKey"] = generate_meshulam_signature(cancel_data)
+                
+                # Call Meshulam API
+                requests.post(
+                    f"{MESHULAM_API_URL}/stopRecurringTransaction",
+                    json=cancel_data
+                )
+            
+            # Update user data
+            db.collection("users").document(user_id).update({
+                "isPremium": False,
+                "subscriptionStatus": "cancelled",
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Update subscription doc
+            db.collection("subscriptions").document(user_id).update({
+                "plan": "basic",
+                "status": "cancelled",
+                "billingCycle": new_billing_cycle,
+                "autoRenew": False,
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            return jsonify({
+                "status": 1,
+                "message": "Plan downgraded to basic",
+                "data": {}
+            }), 200
+        
+        # For plan upgrades or cycle changes, we need to cancel the old subscription
+        # and create a new one
+        result = {
+            "status": 1,
+            "message": "Plan changed successfully",
+            "data": {}
+        }
+        
+        # Calculate prorated amount if needed
+        if recurring_transaction_id:
+            # Cancel existing subscription
+            cancel_data = {
+                "userId": MESHULAM_USER_ID,
+                "recurringTransactionId": recurring_transaction_id
+            }
+            
+            # Add signature
+            cancel_data["apiKey"] = generate_meshulam_signature(cancel_data)
+            
+            # Call Meshulam API
+            requests.post(
+                f"{MESHULAM_API_URL}/stopRecurringTransaction",
+                json=cancel_data
+            )
+            
+        # Update end date based on new billing cycle
+        now = datetime.now(timezone.utc)
+        if new_billing_cycle == 'yearly':
+            end_date = now + timedelta(days=365)
+        else:
+            end_date = now + timedelta(days=30)
+        
+        # Update subscription in Firestore
+        db.collection("subscriptions").document(user_id).update({
+            "plan": new_plan,
+            "billingCycle": new_billing_cycle,
+            "status": "active",
+            "endDate": end_date.isoformat(),
+            "autoRenew": True,
+            "updatedAt": now.isoformat()
+        })
+        
+        # Update user data
+        db.collection("users").document(user_id).update({
+            "isPremium": True,
+            "subscriptionStatus": "active",
+            "subscriptionEndDate": end_date.isoformat(),
+            "updatedAt": now.isoformat()
+        })
+        
+        result["data"]["newEndDate"] = end_date.isoformat()
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error changing subscription plan: {e}", exc_info=True)
+        return jsonify({
+            "status": 0,
+            "message": f"Error: {str(e)}",
+            "data": {}
+        }), 500
+
+# (15) Meshulam Webhook Handler
+@app.route('/api/webhook/meshulam', methods=['POST'])
+def meshulam_webhook():
+    try:
+        # Get webhook data
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        # Validate the webhook signature (implementation depends on Meshulam's webhook format)
+        # This is a security measure to ensure the webhook is from Meshulam
+        
+        # Process transaction based on status
+        transaction_id = data.get('transaction_id')
+        status = data.get('status')
+        
+        if not transaction_id:
+            logger.warning("⚠ Webhook missing transaction ID")
+            return jsonify({"error": "Missing transaction ID"}), 400
+            
+        # Get transaction from Firestore
+        transaction_ref = db.collection("payments").document(transaction_id)
+        transaction_doc = transaction_ref.get()
+        
+        if not transaction_doc.exists:
+            logger.warning(f"⚠ Transaction {transaction_id} not found")
+            return jsonify({"error": "Transaction not found"}), 404
+            
+        transaction_data = transaction_doc.to_dict()
+        user_id = transaction_data.get('userId')
+        
+        # Update transaction status
+        transaction_ref.update({
+            "status": status,
+            "webhookData": data,
+            "updatedAt": datetime.now(timezone.utc).isoformat()
+        })
+        
+        # If transaction successful, update subscription
+        if status == "completed" or status == "success":
+            # Get payment details
+            payment_details = transaction_data
+            
+            # Check if monthly or yearly from description
+            is_yearly = "yearly" in payment_details.get("plan", "").lower()
+            
+            # Set subscription end date
+            end_date = datetime.now(timezone.utc)
+            if is_yearly:
+                end_date += timedelta(days=365)
+            else:
+                end_date += timedelta(days=30)
+                
+            # Update user
+            db.collection("users").document(user_id).update({
+                "isPremium": True,
+                "subscriptionStatus": "active",
+                "subscriptionEndDate": end_date.isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Update subscription
+            subscription_ref = db.collection("subscriptions").document(user_id)
+            subscription_doc = subscription_ref.get()
+            
+            if subscription_doc.exists:
+                subscription_ref.update({
+                    "status": "active",
+                    "endDate": end_date.isoformat(),
+                    "transactionId": transaction_id,
+                    "updatedAt": datetime.now(timezone.utc).isoformat()
+                })
+            else:
+                # Create new subscription document
+                subscription_data = {
+                    "userId": user_id,
+                    "plan": "premium",  # Default to premium for paid transactions
+                    "billingCycle": "monthly" if not is_yearly else "yearly",
+                    "status": "active",
+                    "startDate": datetime.now(timezone.utc).isoformat(),
+                    "endDate": end_date.isoformat(),
+                    "autoRenew": True,
+                    "transactionId": transaction_id,
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                    "updatedAt": datetime.now(timezone.utc).isoformat()
+                }
+                
+                subscription_ref.set(subscription_data)
+                
+        # If transaction failed
+        elif status == "failed" or status == "cancelled":
+            # Update user to free plan if needed
+            user_ref = db.collection("users").document(user_id)
+            user_doc = user_ref.get()
+            
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                
+                # Only update if this was their active subscription
+                if user_data.get("subscriptionStatus") == "active":
+                    user_ref.update({
+                        "isPremium": False,
+                        "subscriptionStatus": "cancelled",
+                        "updatedAt": datetime.now(timezone.utc).isoformat()
+                    })
+            
+            # Update subscription if exists
+            subscription_ref = db.collection("subscriptions").document(user_id)
+            subscription_doc = subscription_ref.get()
+            
+            if subscription_doc.exists:
+                subscription_ref.update({
+                    "status": "cancelled",
+                    "updatedAt": datetime.now(timezone.utc).isoformat()
+                })
+        
+        return jsonify({"success": True}), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing webhook: {e}", exc_info=True)
+        return jsonify({"error": f"Error: {str(e)}"}), 500
 
 # (10) Frontend Serving
 @app.route('/')

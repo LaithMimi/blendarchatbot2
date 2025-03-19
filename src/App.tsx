@@ -12,8 +12,9 @@ import ChatLogs from "./pages/ChatLogs";
 import NotFound from "./pages/NotFound";
 import Header from "./components/Header";
 import Subscription from "./pages/Subscription";
+import SubscriptionSuccess from "./pages/SubscriptionSuccess";
+import SubscriptionCancel from "./pages/SubscriptionCancel";
 import { useAuth } from "./contexts/AuthContext";
-
 const queryClient = new QueryClient();
 
 // Protected Route component

@@ -28,6 +28,7 @@ export const useChat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
+  const [messageCount, setMessageCount] = useState(0);
   const [userPreferences, setUserPreferences] = useState<UserPreferences>({
     name: '',
     level: 'beginner',
@@ -35,6 +36,9 @@ export const useChat = () => {
     gender: 'male',
     language: 'english'
   });
+  
+  // Maximum messages for free plan
+  const maxMessages = 50;
   
   const { toast } = useToast();
   const { userName } = useAuth();
@@ -75,6 +79,12 @@ export const useChat = () => {
         // If no userName, show the prompt
         setShowPreferences(true);
       }
+    }
+    
+    // Load message count from local storage
+    const localCount = localStorage.getItem('messageCount');
+    if (localCount) {
+      setMessageCount(parseInt(localCount, 10));
     }
   }, [userName]);
   
@@ -154,6 +164,16 @@ export const useChat = () => {
     
     console.log('Sending message:', content);
     
+    // Check if we're at the message limit
+    if (messageCount >= maxMessages) {
+      toast({
+        title: "Message limit reached",
+        description: "You've reached the maximum messages for the free plan. Please upgrade to premium for unlimited messages.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     const newMessage: Message = {
       id: Date.now().toString(),
       content,
@@ -195,6 +215,11 @@ export const useChat = () => {
       };
       
       setMessages(prev => [...prev, aiMessage]);
+      
+      // Increment and save message count
+      const newCount = messageCount + 1;
+      setMessageCount(newCount);
+      localStorage.setItem('messageCount', newCount.toString());
       
       // Save messages to local storage in a format compatible with ChatLogs
       const sessionId = Date.now().toString();
@@ -303,6 +328,8 @@ export const useChat = () => {
       
       // Now call the existing message handler
       handleSendMessage(content);
-    }
+    },
+    messageCount,
+    maxMessages
   };
 };

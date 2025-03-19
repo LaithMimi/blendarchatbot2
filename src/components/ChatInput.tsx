@@ -4,9 +4,10 @@ import { Mic, MicOff, Send } from 'lucide-react';
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
+  disabled?: boolean;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage }) => {
+const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, disabled = false }) => {
   const [message, setMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isRtl, setIsRtl] = useState(false);
@@ -61,13 +62,14 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage }) => {
           name="message"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder="Type your message here..."
+          placeholder={disabled ? "Upgrade to premium to send more messages" : "Type your message here..."}
           className={`w-full py-3 px-4 rounded-full bg-white/80 dark:bg-black/20 backdrop-blur-md border border-white/20 dark:border-white/10 focus:ring-2 focus:ring-brand-yellow/30 focus:outline-none transition-all duration-300 ${
             isRtl ? 'text-right' : 'text-left'
           }`}
           dir={isRtl ? "rtl" : "ltr"}
           lang={isRtl ? (message.match(/[\u0600-\u06FF]/) ? "ar" : "he") : "en"}
           autoComplete="off"
+          disabled={disabled}
         />
         
         {isRecording && (
@@ -81,9 +83,9 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage }) => {
       
       <button
         type="submit"
-        disabled={!message.trim()}
+        disabled={!message.trim() || disabled}
         className={`p-3 rounded-full bg-brand-bordeaux text-white transition-all duration-300 ${
-          message.trim() 
+          message.trim() && !disabled
             ? 'opacity-100 hover:shadow-md hover:scale-[1.02]' 
             : 'opacity-50 cursor-not-allowed'
         }`}

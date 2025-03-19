@@ -7,12 +7,14 @@ interface ChatContainerProps {
   messages: Message[];
   isTyping: boolean;
   onSendMessage: (message: string) => void;
+  disabled?: boolean;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({ 
   messages, 
   isTyping, 
-  onSendMessage 
+  onSendMessage,
+  disabled = false
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -49,7 +51,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         <div ref={messagesEndRef} />
       </div>
       <div className="chat-input-container border-t-brand-bordeaux/20">
-        <ChatInput onSendMessage={onSendMessage} />
+        <ChatInput onSendMessage={onSendMessage} disabled={disabled} />
       </div>
     </div>
   );
