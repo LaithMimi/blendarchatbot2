@@ -1,7 +1,7 @@
 // src/api/askApi.ts
 import { db } from '../config/firebaseConfig';
 import { collection, doc, getDoc, setDoc, updateDoc, query, where, getDocs } from 'firebase/firestore';
-
+import { deleteDoc } from 'firebase/firestore';
 export interface Message {
   id: string;
   content: string;
@@ -157,17 +157,17 @@ export async function fetchChatLogs(
   }
   
   // Fall back to API if Firestore fetch fails or isn't available
-  const params = new URLSearchParams();
-  params.set("page", String(currentPage));
-  params.set("pageSize", String(pageSize));
+  const query = new URLSearchParams();
+  query.set("page", String(currentPage));
+  query.set("pageSize", String(pageSize));
   
-  if (searchTerm) params.set("searchTerm", searchTerm);
-  if (userId) params.set("userId", userId);
+  if (searchTerm) query.set("searchTerm", searchTerm);
+  if (userId) query.set("userId", userId);
   
-  if (dateRange?.from) params.set("dateFrom", dateRange.from.toISOString());
-  if (dateRange?.to) params.set("dateTo", dateRange.to.toISOString());
+  if (dateRange?.from) query.set("dateFrom", dateRange.from.toISOString());
+  if (dateRange?.to) query.set("dateTo", dateRange.to.toISOString());
 
-  const url = `/api/chatlogs?${params.toString()}`;
+  const url = `/api/chatlogs?${query.toString()}`;
   const res = await fetch(url, { method: "GET" });
   
   if (!res.ok) {
@@ -210,14 +210,9 @@ export async function deleteAllChats(): Promise<{success: boolean}> {
   const res = await fetch("/api/chatlogs", {
     method: "DELETE",
   });
-  
   if (!res.ok) {
     throw new Error(`deleteAllChats failed: ${res.status} - ${res.statusText}`);
   }
-  
-  // If Firestore is available, we could implement a batch delete
-  // This would require more complex logic with batches/transactions
-  
   return res.json();
 }
 
@@ -294,5 +289,3 @@ function isWithinDateRange(chat: ChatSession, dateRange: { from: Date, to: Date 
   return chatDate >= dateRange.from && chatDate <= dateRange.to;
 }
 
-// Import the missing functions from firebase
-import { deleteDoc } from 'firebase/firestore';
