@@ -1,0 +1,185 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+#root {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+}
+
+/* Animation classes */
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Add responsive animation duration for float */
+@media (max-width: 768px) {
+  .animate-float {
+    animation-duration: 4s; /* Shorter duration on mobile */
+  }
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Additional animation for decorative elements specifically for mobile */
+@keyframes float-mobile {
+  0% {
+    transform: translateY(0px) translateX(0px);
+  }
+  50% {
+    transform: translateY(-5px) translateX(3px);
+  }
+  100% {
+    transform: translateY(0px) translateX(0px);
+  }
+}
+
+@media (max-width: 768px) {
+  .float {
+    animation: float-mobile 4s ease-in-out infinite;
+  }
+}
+
+/* Animation for slower floating elements */
+@keyframes float-slower {
+  0% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(2deg);
+  }
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+}
+
+.animate-float-slower {
+  animation: float-slower 12s ease-in-out infinite;
+}
+
+/* Glass card effect */
+.glass-card {
+  @apply backdrop-blur-md bg-white/70 dark:bg-black/30 border border-white/20 dark:border-white/10 shadow-lg;
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  @apply transform-gpu -translate-y-1 shadow-xl bg-white/80 dark:bg-black/40;
+}
+
+/* Scroll smooth behavior for the whole page */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Call to action button effects */
+.btn-hover-effect {
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-hover-effect:after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: inherit;
+  transform: translateX(-100%);
+  transition: all 0.3s ease;
+}
+
+.btn-hover-effect:hover:after {
+  transform: translateX(0);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Add support for RTL text */
+[dir="rtl"] {
+  text-align: right;
+}
+
+/* Focus styles for accessibility */
+*:focus-visible {
+  outline: 2px solid #811E2F;
+  outline-offset: 2px;
+}
+
+/* 3D Card Effect Utilities */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.rounded-inherit {
+  border-radius: inherit;
+}
+
+.transform-gpu {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* Updated styles for header scrolling behavior */
+header.sticky {
+  z-index: 50;
+}
