@@ -1,15 +1,10 @@
+// src/hooks/useChat.ts
 import { useState, useEffect } from 'react';
-import { askQuestion } from '@/api/askApi';
+import { askQuestion, getChatSession, normalizeMessage } from '@/api/askApi';
 import { useToast } from '@/hooks/use-toast';
 import { UserPreferences } from '@/components/PreferencesPopup';
 import { useAuth } from '@/contexts/AuthContext';
-
-export interface Message {
-  id: string;
-  content: string;
-  isUser: boolean;
-  timestamp: Date;
-}
+import { Message } from '@/api/askApi';
 
 // Helper function to safely encode strings with non-Latin1 characters
 export const safeEncode = (str: string): string => {
@@ -29,6 +24,7 @@ export const useChat = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [messageCount, setMessageCount] = useState(0);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [userPreferences, setUserPreferences] = useState<UserPreferences>({
     name: '',
     level: 'beginner',
@@ -41,7 +37,7 @@ export const useChat = () => {
   const maxMessages = 50;
   
   const { toast } = useToast();
-  const { userName, currentUser } = useAuth();
+  const { userName, currentUser, isPremium } = useAuth();
   
   useEffect(() => {
     // Check if preferences are already saved
@@ -58,7 +54,14 @@ export const useChat = () => {
       
       // Add welcome message if we have a user name
       if (parsedPreferences.name) {
-        addWelcomeMessage(parsedPreferences);
+        // If we have a session ID in local storage, try to load it
+        const storedSessionId = localStorage.getItem('currentSessionId');
+        if (storedSessionId) {
+          setSessionId(storedSessionId);
+          loadExistingSession(storedSessionId);
+        } else {
+          addWelcomeMessage(parsedPreferences);
+        }
       } else {
         // Only show the preferences popup if no preferences are saved
         setShowPreferences(true);
@@ -88,6 +91,25 @@ export const useChat = () => {
     }
   }, [userName]);
   
+  // Load an existing chat session from Firestore or API
+  const loadExistingSession = async (sessionId: string) => {
+    try {
+      const session = await getChatSession(sessionId);
+      if (session && session.messages && session.messages.length > 0) {
+        // Convert messages to the expected format
+        const normalizedMessages = session.messages.map(msg => normalizeMessage(msg));
+        setMessages(normalizedMessages);
+      } else {
+        // If session couldn't be loaded, create a new welcome message
+        addWelcomeMessage(userPreferences);
+      }
+    } catch (error) {
+      console.error("Failed to load existing session:", error);
+      // If session couldn't be loaded, create a new welcome message
+      addWelcomeMessage(userPreferences);
+    }
+  };
+  
   const addWelcomeMessage = (preferences: UserPreferences) => {
     let welcomeMessage = '';
     
@@ -99,57 +121,15 @@ export const useChat = () => {
       welcomeMessage = `Hello ${preferences.name}! I'm your assistant for learning Arabic. How can I help you today?`;
     }
     
-    const welcomeMsg = {
-      id: '1',
+    const welcomeMsg: Message = {
+      id: Date.now().toString(),
       content: welcomeMessage,
-      isUser: false,
-      timestamp: new Date()
+      sender: 'bot',
+      timestamp: new Date().toISOString(),
+      isUser: false
     };
     
     setMessages([welcomeMsg]);
-    
-    // Also save welcome message to local storage
-    const sessionId = Date.now().toString();
-    const localChats = JSON.parse(localStorage.getItem('chatHistory') || '[]');
-    
-    // Use email as userId if available
-    const userEmail = currentUser || preferences.name;
-    const userId = safeEncode(userEmail);
-    
-    // Check if we already have a chat for this user
-    const existingSessionIndex = localChats.findIndex((chat: any) => 
-      chat.userId === userId
-    );
-    
-    if (existingSessionIndex >= 0) {
-      // Add to existing session
-      if (!localChats[existingSessionIndex].messages) {
-        localChats[existingSessionIndex].messages = [];
-      }
-      
-      localChats[existingSessionIndex].messages.push({
-        id: welcomeMsg.id,
-        text: welcomeMsg.content,
-        sender: 'bot',
-        timestamp: welcomeMsg.timestamp
-      });
-    } else {
-      // Create new session
-      localChats.push({
-        _id: sessionId,
-        sessionId: sessionId,
-        userId: userId,
-        userName: preferences.name,
-        messages: [{
-          id: welcomeMsg.id,
-          text: welcomeMsg.content,
-          sender: 'bot',
-          timestamp: welcomeMsg.timestamp
-        }]
-      });
-    }
-    
-    localStorage.setItem('chatHistory', JSON.stringify(localChats));
   };
   
   const handleSavePreferences = (preferences: UserPreferences) => {
@@ -165,41 +145,15 @@ export const useChat = () => {
 
   // Add a limit reached message to the chat
   const addLimitReachedMessage = () => {
-    const limitMessage = {
+    const limitMessage: Message = {
       id: Date.now().toString(),
       content: "You've reached the limit of free messages for today. Upgrade to Premium for unlimited messages and additional features. Click the button below to upgrade and continue your Arabic learning journey without interruptions.",
-      isUser: false,
-      timestamp: new Date()
+      sender: 'bot',
+      timestamp: new Date().toISOString(),
+      isUser: false
     };
     
     setMessages(prev => [...prev, limitMessage]);
-    
-    // Save the limit message to local storage
-    const localChats = JSON.parse(localStorage.getItem('chatHistory') || '[]');
-    const userEmail = currentUser || userPreferences.name;
-    const userIdEncoded = safeEncode(userEmail);
-    
-    // Check if we already have a chat for this user
-    const existingSessionIndex = localChats.findIndex((chat: any) => 
-      chat.userId === userIdEncoded
-    );
-    
-    if (existingSessionIndex >= 0) {
-      // Add to existing session
-      if (!localChats[existingSessionIndex].messages) {
-        localChats[existingSessionIndex].messages = [];
-      }
-      
-      // Add bot response
-      localChats[existingSessionIndex].messages.push({
-        id: limitMessage.id,
-        text: limitMessage.content,
-        sender: 'bot',
-        timestamp: limitMessage.timestamp
-      });
-      
-      localStorage.setItem('chatHistory', JSON.stringify(localChats));
-    }
   };
   
   const handleSendMessage = async (content: string) => {
@@ -207,8 +161,8 @@ export const useChat = () => {
     
     console.log('Sending message:', content);
     
-    // Check if we're at the message limit
-    if (messageCount >= maxMessages) {
+    // Check if we're at the message limit and not premium
+    if (messageCount >= maxMessages && !isPremium) {
       toast({
         title: "Message limit reached",
         description: "You've reached the maximum messages for the free plan. Please upgrade to premium for unlimited messages.",
@@ -223,8 +177,9 @@ export const useChat = () => {
     const newMessage: Message = {
       id: Date.now().toString(),
       content,
-      isUser: true,
-      timestamp: new Date()
+      sender: 'user',
+      timestamp: new Date().toISOString(),
+      isUser: true
     };
     
     setMessages(prev => [...prev, newMessage]);
@@ -236,7 +191,8 @@ export const useChat = () => {
         level: userPreferences.level,
         week: userPreferences.week,
         gender: userPreferences.gender,
-        language: userPreferences.language
+        language: userPreferences.language,
+        sessionId
       });
       
       const response = await askQuestion(
@@ -244,7 +200,8 @@ export const useChat = () => {
         userPreferences.week,
         userPreferences.level, 
         userPreferences.gender, 
-        userPreferences.language
+        userPreferences.language,
+        sessionId || undefined
       );
       
       console.log('Received API response:', response);
@@ -253,106 +210,45 @@ export const useChat = () => {
         throw new Error('Invalid response from server');
       }
       
+      // If this is the first message, save the session ID
+      if (!sessionId && response.sessionId) {
+        setSessionId(response.sessionId);
+        localStorage.setItem('currentSessionId', response.sessionId);
+      }
+      
       const aiMessage: Message = {
         id: Date.now().toString(),
         content: response.answer,
-        isUser: false,
-        timestamp: new Date()
+        sender: 'bot',
+        timestamp: new Date().toISOString(),
+        isUser: false
       };
       
-      setMessages(prev => [...prev, aiMessage]);
-      
-      // Increment and save message count
-      const newCount = messageCount + 1;
-      setMessageCount(newCount);
-      localStorage.setItem('messageCount', newCount.toString());
-      
-      // Save messages to local storage in a format compatible with ChatLogs
-      const sessionId = Date.now().toString();
-      
-      // Use email as userId if available
-      const userEmail = currentUser || userPreferences.name;
-      const userIdEncoded = safeEncode(userEmail);
-      
-      const localChats = JSON.parse(localStorage.getItem('chatHistory') || '[]');
-      
-      // Check if we already have a chat for this user
-      const existingSessionIndex = localChats.findIndex((chat: any) => 
-        chat.userId === userIdEncoded
-      );
-      
-      if (existingSessionIndex >= 0) {
-        // Add to existing session
-        if (!localChats[existingSessionIndex].messages) {
-          localChats[existingSessionIndex].messages = [];
-        }
-        
-        // Add user message
-        localChats[existingSessionIndex].messages.push({
-          id: newMessage.id,
-          text: newMessage.content,
-          sender: 'user',
-          timestamp: newMessage.timestamp
-        });
-        
-        // Add bot response
-        localChats[existingSessionIndex].messages.push({
-          id: aiMessage.id,
-          text: aiMessage.content,
-          sender: 'bot',
-          timestamp: aiMessage.timestamp
-        });
+      // Update messages with the complete chat history if available
+      if (response.chatSession && response.chatSession.messages) {
+        const normalizedMessages = response.chatSession.messages.map(msg => normalizeMessage(msg));
+        setMessages(normalizedMessages);
       } else {
-        // Create new session
-        localChats.push({
-          _id: sessionId,
-          sessionId: sessionId,
-          userId: userIdEncoded,
-          userName: userPreferences.name,
-          messages: [
-            {
-              id: newMessage.id,
-              text: newMessage.content,
-              sender: 'user',
-              timestamp: newMessage.timestamp
-            },
-            {
-              id: aiMessage.id,
-              text: aiMessage.content,
-              sender: 'bot',
-              timestamp: aiMessage.timestamp
-            }
-          ]
-        });
+        // Fallback to just adding the new message
+        setMessages(prev => [...prev, aiMessage]);
       }
       
-      localStorage.setItem('chatHistory', JSON.stringify(localChats));
-      
-      // Check if user is approaching the limit
-      if (newCount === Math.floor(maxMessages * 0.8)) {
-        // Add a warning message about approaching the limit
-        const warningMessage: Message = {
-          id: Date.now().toString(),
-          content: `You're approaching your free message limit (${newCount}/${maxMessages}). Consider upgrading to Premium for unlimited messages.`,
-          isUser: false,
-          timestamp: new Date()
-        };
+      // Increment and save message count for non-premium users
+      if (!isPremium) {
+        const newCount = messageCount + 1;
+        setMessageCount(newCount);
+        localStorage.setItem('messageCount', newCount.toString());
         
-        setMessages(prev => [...prev, warningMessage]);
-        
-        // Add the warning message to local storage as well
-        if (existingSessionIndex >= 0) {
-          localChats[existingSessionIndex].messages.push({
-            id: warningMessage.id,
-            text: warningMessage.content,
-            sender: 'bot',
-            timestamp: warningMessage.timestamp
+        // Check if user is approaching the limit
+        if (newCount === Math.floor(maxMessages * 0.8)) {
+          // Add a warning message about approaching the limit
+          toast({
+            title: "Message limit approaching",
+            description: `You're approaching your free message limit (${newCount}/${maxMessages}). Consider upgrading to Premium for unlimited messages.`,
+            variant: "default"
           });
-          
-          localStorage.setItem('chatHistory', JSON.stringify(localChats));
         }
       }
-      
     } catch (error) {
       console.error('Error getting response from backend:', error);
       
@@ -362,8 +258,9 @@ export const useChat = () => {
         const authErrorMessage: Message = {
           id: Date.now().toString(),
           content: "I'm having trouble authenticating your session. Please try logging in again or refreshing the page. If this error persists, check that your session hasn't expired.",
-          isUser: false,
-          timestamp: new Date()
+          sender: 'bot',
+          timestamp: new Date().toISOString(),
+          isUser: false
         };
         setMessages(prev => [...prev, authErrorMessage]);
         

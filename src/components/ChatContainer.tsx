@@ -50,7 +50,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         )}
         <div ref={messagesEndRef} />
       </div>
-      <div className="chat-input-container border-t-brand-bordeaux/20">
+       <div className="chat-input-container border-t-brand-bordeaux/20">
         <ChatInput onSendMessage={onSendMessage} disabled={disabled} />
       </div>
     </div>
