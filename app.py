@@ -6,6 +6,7 @@ import requests
 import json
 import hashlib
 import hmac
+import base64
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
@@ -75,10 +76,51 @@ def generate_meshulam_signature(data):
     ).hexdigest()
     return signature
 
+# Email encoding/decoding helpers
+def encode_email(email):
+    """Encode email to use as a user ID"""
+    try:
+        return base64.urlsafe_b64encode(email.encode()).decode()
+    except Exception as e:
+        logger.error(f"❌ Error encoding email: {str(e)}")
+        return email
+
+def decode_email(encoded_email):
+    """Decode an email-based user ID back to email"""
+    try:
+        return base64.urlsafe_b64decode(encoded_email.encode()).decode()
+    except Exception as e:
+        logger.error(f"❌ Error decoding email: {str(e)}")
+        return encoded_email
+
+def get_user_email(user_id):
+    """Get user email from Firebase Auth or return the user_id if it's already an email"""
+    if '@' in user_id:
+        return user_id
+    
+    try:
+        # Try to get user record from Firebase Auth
+        user_record = auth.get_user(user_id)
+        if user_record.email:
+            return user_record.email
+    except Exception as e:
+        logger.warning(f"Could not get user email from auth: {e}")
+        
+        # Try to decode in case it's already an encoded email
+        decoded = decode_email(user_id)
+        if '@' in decoded:
+            return decoded
+    
+    return user_id
+
+def get_user_id_from_email(email):
+    """Convert email to a consistent user ID format"""
+    return encode_email(email)
+
 # Initialize Flask app
 app = Flask(__name__, static_folder='./build', static_url_path='')
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")
-CORS(app, resources={r"/": {"origins": ""}})
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # (1) Global 500 Error Handler
 @app.errorhandler(500)
@@ -141,8 +183,12 @@ def verify_token():
 
     try:
         decoded_token = auth.verify_id_token(token)
-        logger.info(f"Authenticated user: {decoded_token['uid']}")
-        return decoded_token["uid"], None
+        user_id = decoded_token["uid"]
+        # Get user's email to use as the consistent identifier
+        user_email = get_user_email(user_id)
+        logger.info(f"Authenticated user: {user_id}, email: {user_email}")
+        # Return the email as the primary user ID
+        return user_email, None
     except auth.ExpiredIdTokenError:
         logger.warning("Expired token")
         return None, "Token expired - please reauthenticate"
@@ -236,37 +282,56 @@ def safe_firestore_set(collection, document_id, data, merge=False):
         return False
 
 def safe_get_materials(level, week):
-    """
-    Example retrieval of learning materials by level + week.
-    Materials in Firestore might have an 'id' like 'beginner_week_01', 'beginner_week_02', etc.
-    """
+    """Safely get teaching materials from Firestore"""
     if not firebase_initialized or not db:
-        logger.warning("⚠ Firebase not initialized, skipping materials retrieval")
+        logger.warning("⚠️ Firebase not initialized, skipping materials retrieval")
         return []
+
     try:
+        # Remove the 'week' prefix if it exists
         clean_week = week.replace('week', '').zfill(2)
-        lesson_key = f"{level}week{clean_week}"
+        lesson_key = f"{level}_week_{clean_week}"
+        logger.info(f"🔍 Searching for materials with lesson key: {lesson_key}")
+
+        # Query for documents where the ID starts with the lesson key
         docs = db.collection("materials").where("id", ">=", lesson_key).where("id", "<", lesson_key + "_z").stream()
+
+        # Convert to list of dictionaries
         materials = [doc.to_dict() for doc in docs]
-        logger.info(f"📚 Retrieved {len(materials)} relevant materials.")
+
+        logger.info(f"📚 Retrieved {len(materials)} relevant teaching materials.")
+
+        # Log the retrieved materials for debugging
+        for mat in materials:
+            logger.info(f"Retrieved material: {mat['id']}")
+
         return materials
     except Exception as e:
         logger.error(f"❌ Error fetching materials: {e}", exc_info=True)
         return []
 
 # Check if user has an active subscription
-def check_subscription_status(user_id):
-    """Verify if a user has an active subscription"""
+def check_subscription_status(user_email):
+    """Verify if a user has an active subscription using email as ID"""
     if not firebase_initialized or not db:
         logger.warning("⚠ Firebase not initialized, skipping subscription check")
         return False
     
     try:
+        # Convert email to consistent user ID format
+        user_id = get_user_id_from_email(user_email)
+        
         # First check user document for isPremium flag
         user_ref = db.collection("users").document(user_id).get()
         
         if not user_ref.exists:
-            return False
+            # Try with the raw email as fallback
+            user_ref = db.collection("users").document(user_email).get()
+            if user_ref.exists:
+                # Update the user_id to use the raw email if found
+                user_id = user_email
+            else:
+                return False
             
         user_data = user_ref.to_dict()
         
@@ -278,12 +343,25 @@ def check_subscription_status(user_id):
         subscription_ref = db.collection("subscriptions").document(user_id).get()
         
         if not subscription_ref.exists:
-            # Update user document to reflect no subscription
-            db.collection("users").document(user_id).update({
-                "isPremium": False,
-                "updatedAt": datetime.now(timezone.utc).isoformat()
-            })
-            return False
+            # Try with raw email as fallback
+            if user_id != user_email:
+                subscription_ref = db.collection("subscriptions").document(user_email).get()
+                if subscription_ref.exists:
+                    user_id = user_email
+                else:
+                    # Update user document to reflect no subscription
+                    db.collection("users").document(user_id).update({
+                        "isPremium": False,
+                        "updatedAt": datetime.now(timezone.utc).isoformat()
+                    })
+                    return False
+            else:
+                # Update user document to reflect no subscription
+                db.collection("users").document(user_id).update({
+                    "isPremium": False,
+                    "updatedAt": datetime.now(timezone.utc).isoformat()
+                })
+                return False
             
         subscription_data = subscription_ref.to_dict()
         
@@ -325,10 +403,11 @@ def ask():
     try:
         logger.info("📝 Received request to /ask endpoint")
     
-        user_id, error = verify_token()
+        user_email, error = verify_token()
         if error:
             logger.warning(f"🔒 Authentication error: {error}")
             return jsonify({"error": error}), 401
+            
         data = request.json
         if not data:
             logger.warning("❌ No JSON data in request.")
@@ -345,28 +424,41 @@ def ask():
         gender = data.get('gender', 'male')
         language = data.get('language', 'Hebrew')
 
-        # Check if we've stored a conversation_id in session
-        if 'conversation_id' in session:
-            session_id = session['conversation_id']
-        else:
-            session_id = f"session_{user_id}_{str(uuid.uuid4())}"
-            session['conversation_id'] = session_id
+        # Ensure we have an email
+        if not user_email or '@' not in user_email:
+            logger.warning(f"⚠ Invalid user email: {user_email}")
+            return jsonify({"error": "Valid user email required"}), 400
+        
+        # Convert email to consistent user ID format
+        user_id = get_user_id_from_email(user_email)
+        
+        # Create a session ID based on the user's email
+        session_id = f"session_{user_id}_{str(uuid.uuid4())}"
+        session['conversation_id'] = session_id
 
-        logger.info(f"Session ID: {session_id}")
+        logger.info(f"Session ID: {session_id}, User ID: {user_id}, Email: {user_email}")
 
         # Retrieve user data from Firestore or create if none
         user_data = safe_firestore_get("users", user_id, {})
         if not user_data:
-            user_data = {
-                "userId": user_id,
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-                "totalMessages": {},
-                "isPremium": False
-            }
-            safe_firestore_set("users", user_id, user_data)
+            # Try with raw email as fallback
+            user_data = safe_firestore_get("users", user_email, {})
+            if user_data:
+                # Use the raw email as user_id if that's where the data is
+                user_id = user_email
+            else:
+                # Create new user document
+                user_data = {
+                    "userId": user_id,
+                    "email": user_email,
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                    "totalMessages": {},
+                    "isPremium": False
+                }
+                safe_firestore_set("users", user_id, user_data)
 
         # Check if user has premium access
-        has_premium = check_subscription_status(user_id)
+        has_premium = check_subscription_status(user_email)
         
         # (12) Usage Limiter for non-premium users
         if not has_premium:
@@ -400,8 +492,9 @@ def ask():
         if not chat_session:
             chat_session = {
                 "_id": session_id,
-                "userId": user_id,
-                "userName": user_data.get("displayName", ""),
+                "userId": user_email,
+                "userEmail": user_email,
+                "userName": user_data.get("displayName", user_email.split('@')[0]),
                 "messages": [],
                 "createdAt": datetime.now(timezone.utc).isoformat(),
                 "updatedAt": datetime.now(timezone.utc).isoformat(),
@@ -465,7 +558,7 @@ def ask():
 
         # Save to Firestore
         safe_firestore_set("chatLogs", session_id, chat_session)
-        print(f"📝 Chat session saved to Firestore: {session_id}")
+        logger.info(f"📝 Chat session saved to Firestore: {session_id}")
 
         return jsonify({
             "answer": bot_answer,
@@ -515,21 +608,36 @@ def get_chatlogs():
         date_from = request.args.get("dateFrom", None)
         date_to = request.args.get("dateTo", None)
 
-        chat_docs = db.collection("chatLogs").stream()
-        chat_logs = [doc.to_dict() for doc in chat_docs]
+        # If user_filter looks like an email, convert to user ID format for consistency
+        if user_filter and '@' in user_filter:
+            user_filter = get_user_id_from_email(user_filter)
 
-        # Filtering by search term
+        # Additional filtering for userEmail
+        email_filter = request.args.get("userEmail", "").lower()
+
+        # Apply filters
         if search_term:
             chat_logs = [
                 c for c in chat_logs
                 if search_term in c.get("userName", "").lower()
                 or search_term in c.get("userId", "").lower()
+                or search_term in c.get("userEmail", "").lower()
                 or search_term in c.get("_id", "").lower()
             ]
 
         # Filter by userId
         if user_filter:
-            chat_logs = [c for c in chat_logs if user_filter in c.get("userId", "").lower()]
+            chat_logs = [
+                c for c in chat_logs 
+                if user_filter in c.get("userId", "").lower()
+            ]
+
+        # Filter by userEmail
+        if email_filter:
+            chat_logs = [
+                c for c in chat_logs
+                if email_filter in c.get("userEmail", "").lower()
+            ]
 
         # Filter by date range
         if date_from and date_to:
@@ -588,7 +696,7 @@ def delete_all_chatlogs():
 def create_subscription_payment():
     try:
         # Verify authentication
-        user_id, error = verify_token()
+        user_email, error = verify_token()
         if error:
             logger.warning(f"🔒 Authentication error: {error}")
             return jsonify({"error": error, "status": 0}), 401
@@ -598,9 +706,8 @@ def create_subscription_payment():
         if not data:
             return jsonify({"error": "No data provided", "status": 0}), 400
             
-        # Verify user matches the token
-        if user_id != data.get('userId'):
-            return jsonify({"error": "User ID mismatch", "status": 0}), 403
+        # Convert to user ID format for consistency
+        user_id = get_user_id_from_email(user_email)
             
         # Build Meshulam API request
         payment_data = {
@@ -611,10 +718,10 @@ def create_subscription_payment():
             "description": data.get('description', 'Blend.Ar Subscription'),
             "paymentNum": 1,
             "maxPayments": data.get('maxPayments', 1),
-            "customerEmail": data.get('email'),
+            "customerEmail": user_email,
             "successUrl": data.get('successUrl'),
             "cancelUrl": data.get('cancelUrl'),
-            "cField1": user_id,  # Store our user ID in custom field
+            "cField1": user_id,  # Store our encoded user ID in custom field
         }
         
         # Add customer details if provided
@@ -648,6 +755,7 @@ def create_subscription_payment():
         if result.get('status') == 1:
             transaction_data = {
                 "userId": user_id,
+                "userEmail": user_email,
                 "transactionId": result.get('data', {}).get('transactionId'),
                 "status": "pending",
                 "amount": data.get('sum'),
@@ -673,7 +781,7 @@ def create_subscription_payment():
 def verify_payment():
     try:
         # Verify authentication
-        user_id, error = verify_token()
+        user_email, error = verify_token()
         if error:
             logger.warning(f"🔒 Authentication error: {error}")
             return jsonify({"error": error, "status": 0}), 401
@@ -686,6 +794,9 @@ def verify_payment():
         transaction_id = data.get('transactionId')
         if not transaction_id:
             return jsonify({"error": "Transaction ID is required", "status": 0}), 400
+
+        # Convert to user ID format for consistency
+        user_id = get_user_id_from_email(user_email)
             
         # Build Meshulam verification request
         verification_data = {
@@ -723,7 +834,15 @@ def verify_payment():
             })
             
             # Update user subscription data
-            user_data = db.collection("users").document(user_id).get().to_dict()
+            user_doc = db.collection("users").document(user_id).get()
+            
+            if not user_doc.exists:
+                # Try with raw email
+                user_doc = db.collection("users").document(user_email).get()
+                if user_doc.exists:
+                    user_id = user_email
+            
+            user_data = user_doc.to_dict() if user_doc.exists else {"userName": user_email.split('@')[0]}
             
             # Calculate subscription end date based on plan
             payment_details = db.collection("payments").document(transaction_id).get().to_dict()
@@ -738,13 +857,15 @@ def verify_payment():
             else:
                 end_date += timedelta(days=30)
                 
-            # Update user and subscription
-            db.collection("users").document(user_id).update({
+            # Update user
+            db.collection("users").document(user_id).set({
+                "userId": user_email,
+                "userEmail": user_email,
                 "isPremium": True,
                 "subscriptionStatus": "active",
                 "subscriptionEndDate": end_date.isoformat(),
                 "updatedAt": datetime.now(timezone.utc).isoformat()
-            })
+            }, merge=True)
             
             # Create or update subscription record
             subscription_ref = db.collection("subscriptions").document(user_id)
@@ -766,6 +887,7 @@ def verify_payment():
             else:
                 subscription_data = {
                     "userId": user_id,
+                    "userEmail": user_email,
                     "plan": "premium",
                     "billingCycle": "yearly" if is_yearly else "monthly",
                     "status": "active",
@@ -813,7 +935,7 @@ def verify_payment():
 def cancel_subscription():
     try:
         # Verify authentication
-        user_id, error = verify_token()
+        user_email, error = verify_token()
         if error:
             logger.warning(f"🔒 Authentication error: {error}")
             return jsonify({"error": error, "status": 0}), 401
@@ -822,10 +944,9 @@ def cancel_subscription():
         data = request.json
         if not data:
             return jsonify({"error": "No data provided", "status": 0}), 400
-            
-        # Verify user matches the token
-        if user_id != data.get('userId'):
-            return jsonify({"error": "User ID mismatch", "status": 0}), 403
+        
+        # Convert to user ID format for consistency
+        user_id = get_user_id_from_email(user_email)
             
         recurring_transaction_id = data.get('recurringTransactionId')
         if not recurring_transaction_id:
@@ -913,7 +1034,7 @@ def cancel_subscription():
 def change_subscription_plan():
     try:
         # Verify authentication
-        user_id, error = verify_token()
+        user_email, error = verify_token()
         if error:
             logger.warning(f"🔒 Authentication error: {error}")
             return jsonify({"error": error, "status": 0}), 401
@@ -922,10 +1043,9 @@ def change_subscription_plan():
         data = request.json
         if not data:
             return jsonify({"error": "No data provided", "status": 0}), 400
-            
-        # Verify user matches the token
-        if user_id != data.get('userId'):
-            return jsonify({"error": "User ID mismatch", "status": 0}), 403
+        
+        # Convert to user ID format for consistency
+        user_id = get_user_id_from_email(user_email)
             
         # Get plan details
         current_plan = data.get('currentPlan')
@@ -1066,6 +1186,7 @@ def meshulam_webhook():
             
         transaction_data = transaction_doc.to_dict()
         user_id = transaction_data.get('userId')
+        user_email = transaction_data.get('userEmail')
         
         # Update transaction status
         transaction_ref.update({
@@ -1112,6 +1233,7 @@ def meshulam_webhook():
                 # Create new subscription document
                 subscription_data = {
                     "userId": user_id,
+                    "userEmail": user_email,
                     "plan": "premium",  # Default to premium for paid transactions
                     "billingCycle": "monthly" if not is_yearly else "yearly",
                     "status": "active",

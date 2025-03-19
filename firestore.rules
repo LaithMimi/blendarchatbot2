@@ -1,18 +1,42 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow users to manage their own profile
+    // Allow users to read and write their own documents
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null && (
+        // Allow access to own document by UID
+        request.auth.uid == userId ||
+        // Or if document ID matches encoded email
+        request.auth.token.email == decodeBase64(userId) ||
+        // Or if user ID field matches the user's email
+        resource.data.email == request.auth.token.email
+      );
     }
     
-    // Allow authenticated users to manage their chat sessions
+    // Allow users to access their own subscriptions
+    match /subscriptions/{userId} {
+      allow read, write: if request.auth != null && (
+        // Allow access to own document by UID
+        request.auth.uid == userId ||
+        // Or if document ID matches encoded email
+        request.auth.token.email == decodeBase64(userId) ||
+        // Or if user email field matches the user's email
+        resource.data.userEmail == request.auth.token.email
+      );
+    }
+    
+    // Allow users to access their own chat logs
     match /chatLogs/{sessionId} {
-      allow read, write: if request.auth != null && resource.userId == request.auth.uid;
+      allow read, write: if request.auth != null && (
+        // If session belongs to this user
+        resource.data.userId == request.auth.uid ||
+        // Or if session user ID matches encoded email
+        resource.data.userEmail == request.auth.token.email
+      );
     }
     
-    // Allow public read access to materials
-    match /materials/{materialId} {
+    // Materials collection is readable by all authenticated users
+    match /materials/{docId} {
       allow read: if request.auth != null;
     }
   }
