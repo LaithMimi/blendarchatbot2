@@ -433,7 +433,7 @@ def ask():
         user_id = get_user_id_from_email(user_email)
         
         # Create a session ID based on the user's email
-        session_id = f"session_{user_id}_{str(uuid.uuid4())}"
+        session_id = f"session_{user_email.split('@')[0]}"
         session['conversation_id'] = session_id
 
         logger.info(f"Session ID: {session_id}, User ID: {user_id}, Email: {user_email}")
