@@ -26,11 +26,23 @@ export async function askQuestion(
   gender: string, 
   language: string
 ) {
+  // Get auth token from cookie or localStorage
+  const authToken = document.cookie.split('; ').find(row => row.startsWith('authToken='))?.split('=')[1]
+    || sessionStorage.getItem('authToken')
+    || localStorage.getItem('authToken');
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+  
+  // Add Authorization header if token exists
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+
   const res = await fetch("/api/ask", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers,
     body: JSON.stringify({ 
       question,
       week,
