@@ -255,16 +255,35 @@ export const useChat = () => {
       
     } catch (error) {
       console.error('Error getting response from backend:', error);
-      toast({
-        title: "API Error",
-        description: "Could not get a response. Please check the console for details.",
-        variant: "destructive"
-      });
+      
+      // Create a fallback bot response for auth errors
+      if (error.toString().includes('401') || error.toString().includes('UNAUTHORIZED')) {
+        // Authentication error - provide a helpful message
+        const authErrorMessage: Message = {
+          id: Date.now().toString(),
+          content: "I'm having trouble authenticating your session. Please try logging in again or refreshing the page. If this error persists, check that your session hasn't expired.",
+          isUser: false,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, authErrorMessage]);
+        
+        toast({
+          title: "Authentication Error",
+          description: "Your session may have expired. Please log in again.",
+          variant: "destructive"
+        });
+      } else {
+        // General API error
+        toast({
+          title: "API Error",
+          description: "Could not get a response. Please check the console for details.",
+          variant: "destructive"
+        });
+      }
     } finally {
       setIsTyping(false);
     }
   };
-
   return {
     messages,
     isTyping,
