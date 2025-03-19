@@ -41,7 +41,7 @@ export const useChat = () => {
   const maxMessages = 50;
   
   const { toast } = useToast();
-  const { userName } = useAuth();
+  const { userName, currentUser } = useAuth();
   
   useEffect(() => {
     // Check if preferences are already saved
@@ -112,9 +112,13 @@ export const useChat = () => {
     const sessionId = Date.now().toString();
     const localChats = JSON.parse(localStorage.getItem('chatHistory') || '[]');
     
+    // Use email as userId if available
+    const userEmail = currentUser || preferences.name;
+    const userId = safeEncode(userEmail);
+    
     // Check if we already have a chat for this user
     const existingSessionIndex = localChats.findIndex((chat: any) => 
-      chat.userId === safeEncode(preferences.name)
+      chat.userId === userId
     );
     
     if (existingSessionIndex >= 0) {
@@ -134,7 +138,7 @@ export const useChat = () => {
       localChats.push({
         _id: sessionId,
         sessionId: sessionId,
-        userId: safeEncode(preferences.name),
+        userId: userId,
         userName: preferences.name,
         messages: [{
           id: welcomeMsg.id,
@@ -223,7 +227,11 @@ export const useChat = () => {
       
       // Save messages to local storage in a format compatible with ChatLogs
       const sessionId = Date.now().toString();
-      const userIdEncoded = safeEncode(userPreferences.name);
+      
+      // Use email as userId if available
+      const userEmail = currentUser || userPreferences.name;
+      const userIdEncoded = safeEncode(userEmail);
+      
       const localChats = JSON.parse(localStorage.getItem('chatHistory') || '[]');
       
       // Check if we already have a chat for this user
@@ -309,6 +317,7 @@ export const useChat = () => {
       setIsTyping(false);
     }
   };
+  
   return {
     messages,
     isTyping,

@@ -23,13 +23,13 @@ const Chat: React.FC = () => {
   } = useChat();
   
   const [isCheckingSubscription, setIsCheckingSubscription] = useState(true);
-  const { currentUser, isPremium, checkSubscriptionStatus } = useAuth();
+  const { isPremium, checkSubscriptionStatus, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   
   // Check subscription status
   useEffect(() => {
     const verifySubscription = async () => {
-      if (currentUser) {
+      if (isAuthenticated) {
         try {
           await checkSubscriptionStatus();
         } catch (error) {
@@ -43,7 +43,7 @@ const Chat: React.FC = () => {
     };
     
     verifySubscription();
-  }, [currentUser, checkSubscriptionStatus]);
+  }, [isAuthenticated, checkSubscriptionStatus]);
 
   return (
     <div className="min-h-screen flex flex-col bg-brand-background dark:bg-brand-darkGray/90 relative overflow-hidden">

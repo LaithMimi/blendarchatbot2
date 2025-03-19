@@ -253,24 +253,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       resetAuthState();
     }
   };
-
-  const contextValue = {
-    currentUser,
-    email,
-    userName,
-    authToken,
-    isAuthenticated,
-    setEmail,
-    setUserName,
-    setIsAuthenticated,
-    sendEmailLink,
-    completeEmailSignIn,
-    googleSignIn,
-    logout,
-    devLogin,
-    emailLinkSent
-  };
-// Check subscription status
+  
+  // Check subscription status
   const checkSubscriptionStatus = async (): Promise<boolean> => {
     if (!userId) return false;
     
@@ -321,6 +305,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return false;
     }
   };
+
+  const contextValue = {
+    currentUser,
+    email,
+    userName,
+    authToken,
+    isAuthenticated,
+    isPremium,
+    setEmail,
+    setUserName,
+    setIsAuthenticated,
+    sendEmailLink,
+    completeEmailSignIn,
+    googleSignIn,
+    logout,
+    devLogin,
+    emailLinkSent,
+    checkSubscriptionStatus
+  };
+
   return (
     <AuthContext.Provider value={contextValue}>
       {children}
