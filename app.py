@@ -677,6 +677,171 @@ def delete_all_chatlogs():
 def serve():
     return send_from_directory(app.static_folder, 'index.html')
 
+
+@app.route('/api/subscription/info', methods=['GET'])
+def get_subscription_info():
+    """
+    Gets subscription information for the authenticated user.
+    """
+    try:
+        user_email, error = verify_token()
+        if error:
+            logger.warning(f"🔒 Authentication error in subscription info: {error}")
+            return jsonify({"error": error}), 401
+            
+        if not user_email:
+            return jsonify({"error": "User email not found"}), 400
+            
+        # Get user ID from email
+        user_id = get_user_id_from_email(user_email)
+        
+        if not firebase_initialized or not db:
+            logger.warning("⚠ Firebase not initialized, returning empty subscription")
+            return jsonify({"subscription": None}), 200
+            
+        # Try to get subscription for the user
+        try:
+            subscription_ref = db.collection("subscriptions").document(user_id).get()
+            
+            if not subscription_ref.exists:
+                logger.info(f"No subscription found for user: {user_id}")
+                return jsonify({"subscription": None}), 200
+                
+            subscription_data = subscription_ref.to_dict()
+            
+            # Check if subscription is still valid
+            if subscription_data.get("status") in ["active", "trial"]:
+                end_date = datetime.fromisoformat(subscription_data.get("endDate").replace('Z', '+00:00') if subscription_data.get("endDate").endswith('Z') else subscription_data.get("endDate"))
+                
+                if end_date <= datetime.now(timezone.utc):
+                    # Subscription expired
+                    subscription_data["status"] = "expired"
+                    
+                    # Update status in Firestore
+                    db.collection("subscriptions").document(user_id).update({
+                        "status": "expired",
+                        "updatedAt": datetime.now(timezone.utc).isoformat()
+                    })
+                    
+                    # Update user's premium status
+                    db.collection("users").document(user_id).update({
+                        "isPremium": False,
+                        "updatedAt": datetime.now(timezone.utc).isoformat()
+                    })
+            
+            return jsonify({"subscription": subscription_data}), 200
+            
+        except Exception as db_error:
+            logger.error(f"Error fetching subscription from database: {db_error}", exc_info=True)
+            return jsonify({"error": "Database error", "message": str(db_error)}), 500
+            
+    except Exception as e:
+        logger.error(f"Error getting subscription info: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+    
+# (11) Checkout Endpoint for Subscriptions
+@app.route('/create-checkout-session', methods=['POST'])
+def create_checkout_session():
+    """
+    Creates a checkout session for subscription payments.
+    """
+    try:
+        user_email, error = verify_token()
+        if error:
+            logger.warning(f"🔒 Authentication error in checkout: {error}")
+            return jsonify({"error": error}), 401
+            
+        data = request.json
+        if not data:
+            logger.warning("❌ No JSON data in checkout request.")
+            return jsonify({"error": "No data provided"}), 400
+            
+        plan = data.get('plan', 'premium')
+        billing_cycle = data.get('billingCycle', 'monthly')
+        price = data.get('price', 30)  # Default price if not specified
+        user_name = data.get('userName', user_email.split('@')[0])
+        
+        logger.info(f"Creating checkout session for {user_email}, plan: {plan}, cycle: {billing_cycle}")
+        
+        # Generate a unique session ID
+        session_id = str(uuid.uuid4())
+        
+        # Create a direct payment URL using the session ID as reference
+        # This is using Meshulam payment gateway as configured in your functions/main.py
+        # In a production environment, you would call the actual payment gateway API here
+        payment_base_url = "https://meshulam.co.il/purchase"
+        payment_params = {
+            'b': '511448e20886c18a4bab323430775fb8',  # From your code example
+            'full_name': user_name,
+            'email': user_email,
+            'phone': '',
+            'price': price,
+            'custom1': plan,
+            'custom2': billing_cycle,
+            'custom3': session_id
+        }
+        
+        # Create URL with query parameters
+        session_url = f"{payment_base_url}?{'&'.join([f'{k}={v}' for k, v in payment_params.items()])}"
+        
+        # Store the pending subscription in Firestore for tracking
+        if firebase_initialized and db:
+            logger.info(f"Storing pending subscription for user: {user_email}")
+            
+            # Get user ID from email
+            user_id = get_user_id_from_email(user_email)
+            
+            # Determine expiration date based on billing cycle
+            now = datetime.now(timezone.utc)
+            if billing_cycle == 'yearly':
+                end_date = now + timedelta(days=365)
+            else:
+                end_date = now + timedelta(days=30)
+                
+            # Create subscription record
+            subscription_data = {
+                "userId": user_id,
+                "userEmail": user_email,
+                "plan": plan,
+                "billingCycle": billing_cycle,
+                "status": "pending",
+                "startDate": now.isoformat(),
+                "endDate": end_date.isoformat(),
+                "autoRenew": True,
+                "paymentMethod": "meshulam",
+                "sessionId": session_id,
+                "createdAt": now.isoformat(),
+                "updatedAt": now.isoformat()
+            }
+            
+            # Store in subscriptions collection
+            db.collection("subscriptions").document(user_id).set(subscription_data, merge=True)
+            
+            # Also store the transaction details
+            payment_data = {
+                "userId": user_id,
+                "userEmail": user_email,
+                "sessionId": session_id,
+                "plan": plan,
+                "billingCycle": billing_cycle,
+                "amount": price,
+                "status": "pending",
+                "createdAt": now.isoformat()
+            }
+            
+            db.collection("payments").document(session_id).set(payment_data)
+            
+            logger.info(f"Subscription and payment record created for user {user_email}")
+            
+        return jsonify({
+            "sessionId": session_id,
+            "sessionUrl": session_url
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error creating checkout session: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+    
 @app.route('/<path:path>')
 def catch_all(path):
     if path.startswith('api/'):

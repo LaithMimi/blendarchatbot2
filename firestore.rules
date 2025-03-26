@@ -1,6 +1,12 @@
+// Replace the current firestore.rules with this updated version
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Function to decode Base64 for email comparison
+    function decodeBase64(encoded) {
+      return encoded.replace(/_/g, '/').replace(/-/g, '+');
+    }
+    
     // Allow users to read and write their own documents
     match /users/{userId} {
       allow read, write: if request.auth != null && (
@@ -21,7 +27,9 @@ service cloud.firestore {
         // Or if document ID matches encoded email
         request.auth.token.email == decodeBase64(userId) ||
         // Or if user email field matches the user's email
-        resource.data.userEmail == request.auth.token.email
+        resource.data.userEmail == request.auth.token.email ||
+        // Allow a new document to be created with the user's email
+        request.resource.data.userEmail == request.auth.token.email
       );
     }
     
@@ -33,6 +41,19 @@ service cloud.firestore {
         // Or if session user ID matches encoded email
         resource.data.userEmail == request.auth.token.email
       );
+    }
+    
+    // Allow authorized payment operations
+    match /payments/{paymentId} {
+      allow read: if request.auth != null && (
+        // Allow users to read their own payment records
+        resource.data.userEmail == request.auth.token.email ||
+        resource.data.userId == request.auth.uid
+      );
+      
+      // Allow creation of pending payments
+      allow create: if request.auth != null && 
+                      request.resource.data.userEmail == request.auth.token.email;
     }
     
     // Materials collection is readable by all authenticated users

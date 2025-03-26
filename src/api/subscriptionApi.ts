@@ -111,10 +111,16 @@ export const cancelSubscription = async (userId: string): Promise<boolean> => {
  */
 export const getUserSubscription = async (userId: string): Promise<SubscriptionData | null> => {
   try {
+    // First, check if userId is an email, and if so, encode it properly
+    if (userId.includes('@')) {
+      userId = encodeEmail(userId);
+    }
+    
     const subscriptionRef = doc(db, 'subscriptions', userId);
     const subscriptionDoc = await getDoc(subscriptionRef);
     
     if (!subscriptionDoc.exists()) {
+      console.log("No subscription found for user:", userId);
       return null;
     }
     
@@ -122,10 +128,42 @@ export const getUserSubscription = async (userId: string): Promise<SubscriptionD
     
   } catch (error) {
     console.error('Failed to get subscription:', error);
+    
+    // If there's a permission error, try to get subscription through the API
+    try {
+      const response = await fetch('/api/subscription/info', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken') || sessionStorage.getItem('authToken')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.subscription) {
+          return data.subscription as SubscriptionData;
+        }
+      }
+    } catch (apiError) {
+      console.error('Failed to get subscription via API:', apiError);
+    }
+    
     return null;
   }
 };
-
+// Add a helper function to encode email properly for Firestore IDs
+export const encodeEmail = (email: string): string => {
+  try {
+    return btoa(email)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  } catch (e) {
+    console.error("Encoding error:", e);
+    return email;
+  }
+};
 /**
  * Upgrade or downgrade a subscription
  */
@@ -189,5 +227,32 @@ export const getPlanPrice = (plan: SubscriptionPlan, billingCycle: BillingCycle)
  * Check if user has an active subscription
  */
 export const hasActiveSubscription = async (userId: string): Promise<boolean> => {
-  return await verifySubscriptionStatus(userId);
+  try {
+    // First try direct verification through the subscription status API endpoint
+    const functions = getFunctions();
+    const verifySubscriptionFn = httpsCallable(functions, 'verify_subscription');
+    const result = await verifySubscriptionFn({ userId });
+    
+    // @ts-ignore - The result data structure
+    return result.data.isPremium === true;
+  } catch (error) {
+    console.error('Error calling verify_subscription function:', error);
+    
+    // Fallback: try to get the subscription directly
+    try {
+      const subscription = await getUserSubscription(userId);
+      if (!subscription) return false;
+      
+      const isActive = subscription.status === 'active' || subscription.status === 'trial';
+      if (!isActive) return false;
+      
+      // Check if subscription is expired
+      const endDate = new Date(subscription.endDate);
+      const now = new Date();
+      return endDate > now;
+    } catch (subError) {
+      console.error('Error in fallback subscription check:', subError);
+      return false;
+    }
+  }
 };

@@ -72,79 +72,86 @@ const Subscription: React.FC = () => {
     return yearlyBilling ? 'yearly' : 'monthly';
   };
 
-  const handleSubscribe = async (plan: 'basic' | 'premium') => {
-    if (!isAuthenticated) {
+  // Updated handleSubscribe function in src/pages/Subscription.tsx
+const handleSubscribe = async (plan: 'basic' | 'premium') => {
+  if (!isAuthenticated) {
+    toast({
+      title: "Please login",
+      description: "You need to be logged in to subscribe.",
+      variant: "default"
+    });
+    navigate('/auth');
+    return;
+  }
+  
+  // Check if already subscribed to the same plan
+  if (subscription?.plan === plan && 
+      subscription?.billingCycle === getBillingCycle() &&
+      subscription?.status === 'active') {
+    toast({
+      title: "Already subscribed",
+      description: "You are already subscribed to this plan.",
+      variant: "default"
+    });
+    return;
+  }
+  
+  setIsLoading(true);
+  
+  try {
+    // For basic plan, no payment needed
+    if (plan === 'basic') {
       toast({
-        title: "Please login",
-        description: "You need to be logged in to subscribe.",
+        title: "Basic Plan Activated",
+        description: "You are now on the Basic plan.",
         variant: "default"
       });
-      navigate('/auth');
-      return;
-    }
-    
-    // Check if already subscribed to the same plan
-    if (subscription?.plan === plan && 
-        subscription?.billingCycle === getBillingCycle() &&
-        subscription?.status === 'active') {
-      toast({
-        title: "Already subscribed",
-        description: "You are already subscribed to this plan.",
-        variant: "default"
+      navigate('/chat');
+    } else {
+      // For premium, show payment checkout
+      const price = getPlanPrice('premium', getBillingCycle());
+      
+      // Get authentication token from storage
+      const token = localStorage.getItem('authToken') || 
+                    sessionStorage.getItem('authToken') || 
+                    '';
+      
+      const response = await fetch('/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          plan: 'premium',
+          email: email || currentUser,
+          billingCycle: getBillingCycle(),
+          userName: userName || email?.split('@')[0] || 'User',
+          price
+        })
       });
-      return;
-    }
-    
-    setIsLoading(true);
-    
-    try {
-      // For basic plan, no payment needed
-      if (plan === 'basic') {
-        // Stripe does not handle free plan
-        toast({
-          title: "Basic Plan Activated",
-          description: "You are now on the Basic plan.",
-          variant: "default"
-        });
-        navigate('/chat');
-      } else {
-        // For premium, show Stripe checkout
-        const price = getPlanPrice('premium', getBillingCycle());
-        const response = await fetch('/create-checkout-session', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`
-          },
-          body: JSON.stringify({
-            plan: 'premium',
-            email,
-            billingCycle: getBillingCycle(),
-            userName,
-            price
-          })
-        });
 
-        if (!response.ok) {
-          throw new Error('Failed to create checkout session');
-        }
-
-        const { sessionUrl } = await response.json();
-        
-        // Redirect to Stripe Checkout
-        window.location.href = sessionUrl;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create checkout session');
       }
-    } catch (error) {
-      console.error('Subscription error:', error);
-      toast({
-        title: "Subscription Failed",
-        description: "There was an error processing your subscription. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
+
+      const { sessionUrl } = await response.json();
+      
+      // Redirect to Payment Checkout
+      window.location.href = sessionUrl;
     }
-  };
+  } catch (error) {
+    console.error('Subscription error:', error);
+    toast({
+      title: "Subscription Failed",
+      description: "There was an error processing your subscription. Please try again.",
+      variant: "destructive"
+    });
+  } finally {
+    setIsLoading(false);
+  }
+};
   
   const handleCancelSubscription = async () => {
     setIsCancelling(true);
