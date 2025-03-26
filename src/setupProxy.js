@@ -2,11 +2,14 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
+  // The server is running on port 8050, not 8888
+  const API_TARGET = 'http://localhost:8050';
+  
   // Main API proxy
   app.use(
     '/api',
     createProxyMiddleware({
-      target: 'http://localhost:8888',
+      target: API_TARGET,
       changeOrigin: true
     })
   );
@@ -15,7 +18,7 @@ module.exports = function(app) {
   app.use(
     '/create-checkout-session',
     createProxyMiddleware({
-      target: 'http://localhost:8888',
+      target: API_TARGET,
       changeOrigin: true
     })
   );
@@ -24,8 +27,9 @@ module.exports = function(app) {
   app.use(
     '/api/create-checkout-session',
     createProxyMiddleware({
-      target: 'http://localhost:8888',
-      changeOrigin: true
+      target: API_TARGET,
+      changeOrigin: true,
+      pathRewrite: path => path.replace('/api', '')  // Remove /api prefix
     })
   );
   
@@ -33,7 +37,7 @@ module.exports = function(app) {
   app.use(
     '/api/subscription',
     createProxyMiddleware({
-      target: 'http://localhost:8888',
+      target: API_TARGET,
       changeOrigin: true
     })
   );
@@ -42,7 +46,7 @@ module.exports = function(app) {
   app.use(
     '/api/healthcheck',
     createProxyMiddleware({
-      target: 'http://localhost:8888',
+      target: API_TARGET,
       changeOrigin: true
     })
   );

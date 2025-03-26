@@ -1,4 +1,3 @@
-// AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
 import {
   getAuth,
@@ -19,7 +18,6 @@ import {
 } from "firebase/firestore";
 import Cookies from "js-cookie";
 import { app } from "../config/firebaseConfig";
-import { useNavigate } from "react-router-dom";
 
 interface AuthContextType {
   currentUser: string | null;

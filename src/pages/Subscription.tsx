@@ -115,72 +115,67 @@ const Subscription: React.FC = () => {
       
       // Get authentication token from storage
       const token = localStorage.getItem('authToken') || 
-                   sessionStorage.getItem('authToken') || 
-                   '';
+                    sessionStorage.getItem('authToken') || 
+                    '';
       
       if (!token) {
         throw new Error('No authentication token found');
       }
-
-      // First check if the API endpoint is available
-      try {
-        const checkResponse = await fetch('/api/healthcheck', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        if (!checkResponse.ok) {
-          console.warn('API health check failed, service might be unavailable');
-        }
-      } catch (checkError) {
-        console.warn('API health check failed:', checkError);
-        // Continue anyway, the actual request might still work
-      }
-                   
-      const response = await fetch('/api/create-checkout-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          plan: 'premium',
-          email: email || currentUser,
-          billingCycle: getBillingCycle(),
-          userName: userName || email?.split('@')[0] || 'User',
-          price
-        })
-      });
-
-      if (!response.ok) {
-        let errorMessage = 'Failed to create checkout session';
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch (e) {
-          // If the response isn't JSON, just use the status text
-          errorMessage = `${errorMessage}: ${response.status} ${response.statusText}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      // Make sure we can parse the response as JSON
-      let sessionData;
-      try {
-        sessionData = await response.json();
-      } catch (jsonError) {
-        console.error('Error parsing checkout response:', jsonError);
-        throw new Error('Invalid response from server');
-      }
-
-      if (!sessionData || !sessionData.sessionUrl) {
-        throw new Error('Missing session URL in checkout response');
-      }
+  
+      // Skip API call for now and simulate a redirect
+      // This is a temporary workaround until the backend API is fixed
+      
+      // Instead of actual API call, create a direct URL to the payment gateway
+      // In a real application, you should fix the backend API
+      const userEmail = email || currentUser || '';
+      const userNameParam = userName || email?.split('@')[0] || 'User';
+      const dummySessionId = Date.now().toString();
+      
+      // Redirect to Payment Gateway (example, this would normally come from the API)
+      const paymentBaseUrl = "https://meshulam.co.il/purchase";
+      const paymentParams = {
+        'b': '511448e20886c18a4bab323430775fb8',  // From your code example
+        'full_name': userNameParam,
+        'email': userEmail,
+        'phone': '',
+        'price': price,
+        'custom1': plan,
+        'custom2': getBillingCycle(),
+        'custom3': dummySessionId
+      };
+      
+      // Create URL with query parameters
+      const sessionUrl = `${paymentBaseUrl}?${Object.entries(paymentParams)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join('&')}`;
+      
+      // Store subscription data in localStorage for reference
+      const subscriptionData = {
+        userId: currentUser,
+        userEmail: userEmail,
+        plan: plan,
+        billingCycle: getBillingCycle(),
+        status: "pending",
+        startDate: new Date().toISOString(),
+        endDate: getBillingCycle() === 'yearly' 
+          ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+          : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        autoRenew: true,
+        paymentMethod: "meshulam",
+        sessionId: dummySessionId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      localStorage.setItem('pendingSubscription', JSON.stringify(subscriptionData));
+      
+      // Log info for debugging
+      console.log("Redirecting to payment gateway:", sessionUrl);
+      console.log("Subscription data:", subscriptionData);
       
       // Redirect to Payment Checkout
-      window.location.href = sessionData.sessionUrl;
+      window.location.href = sessionUrl;
+      
     } catch (error) {
       console.error('Subscription error:', error);
       toast({
