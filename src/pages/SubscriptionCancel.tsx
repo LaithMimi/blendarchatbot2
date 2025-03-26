@@ -16,9 +16,9 @@ const SubscriptionCancel: React.FC = () => {
               <XCircle className="h-12 w-12 text-amber-600 dark:text-amber-400" />
             </div>
             
-            <h2 className="text-2xl font-bold mb-4">Subscription Cancelled</h2>
+            <h2 className="text-2xl font-bold mb-4">Subscription Payment Cancelled</h2>
             
-            <p className="mb-6 text-muted-foreground">
+            <p className="mb-6 text-muted-foreground text-center">
               Your subscription payment was cancelled. No charges have been made to your account.
             </p>
             

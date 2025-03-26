@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import SubscriptionCard from '@/components/SubscriptionCard';
-import { Star, Shield, Zap, BadgeDollarSign, Loader2, XCircle } from 'lucide-react';
+import { Star, Shield, BadgeDollarSign, Loader2, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -9,9 +9,10 @@ import { Label } from '@/components/ui/label';
 import ChatBackground from '@/components/ChatBackground';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
-  createSubscriptionPayment, 
   getUserSubscription, 
   cancelSubscription, 
+  getPlanPrice,
+  hasActiveSubscription,
   SubscriptionData,
   BillingCycle
 } from '@/api/subscriptionApi';
@@ -71,7 +72,7 @@ const Subscription: React.FC = () => {
     return yearlyBilling ? 'yearly' : 'monthly';
   };
 
-  const handleSubscribe = async (plan: string) => {
+  const handleSubscribe = async (plan: 'basic' | 'premium') => {
     if (!isAuthenticated) {
       toast({
         title: "Please login",
@@ -83,7 +84,7 @@ const Subscription: React.FC = () => {
     }
     
     // Check if already subscribed to the same plan
-    if (subscription?.plan === plan.toLowerCase() && 
+    if (subscription?.plan === plan && 
         subscription?.billingCycle === getBillingCycle() &&
         subscription?.status === 'active') {
       toast({
@@ -98,26 +99,40 @@ const Subscription: React.FC = () => {
     
     try {
       // For basic plan, no payment needed
-      if (plan.toLowerCase() === 'basic') {
-        // Handle basic plan subscription (free)
+      if (plan === 'basic') {
+        // Stripe does not handle free plan
         toast({
           title: "Basic Plan Activated",
           description: "You are now on the Basic plan.",
           variant: "default"
         });
+        navigate('/chat');
       } else {
-        // For premium, initiate payment
-        const paymentUrl = await createSubscriptionPayment(
-          currentUser as string,
-          email,
-          plan.toLowerCase() as any,
-          getBillingCycle(),
-          userName
-        );
+        // For premium, show Stripe checkout
+        const price = getPlanPrice('premium', getBillingCycle());
+        const response = await fetch('/create-checkout-session', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({
+            plan: 'premium',
+            email,
+            billingCycle: getBillingCycle(),
+            userName,
+            price
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to create checkout session');
+        }
+
+        const { sessionUrl } = await response.json();
         
-        // Redirect to payment page
-        window.location.href = paymentUrl;
-        return;
+        // Redirect to Stripe Checkout
+        window.location.href = sessionUrl;
       }
     } catch (error) {
       console.error('Subscription error:', error);
@@ -168,7 +183,6 @@ const Subscription: React.FC = () => {
       setShowCancelDialog(false);
     }
   };
-
   const fadeInUp = {
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0 }
@@ -377,7 +391,7 @@ const SubscriptionInfo = () => {
             buttonText={isLoading ? "Processing..." : "Start Basic"}
             buttonTextHebrew="התחל בסיסי"
             buttonTextArabic="ابدأ الأساسي"
-            onClick={() => handleSubscribe("Basic")}
+            onClick={() => handleSubscribe("basic")}
           />
 
           <SubscriptionCard
@@ -420,7 +434,7 @@ const SubscriptionInfo = () => {
             buttonText={isLoading ? "Processing..." : "Choose Premium"}
             buttonTextHebrew="בחר פרימיום"
             buttonTextArabic="اختر بريميوم"
-            onClick={() => handleSubscribe("Premium")}
+            onClick={() => handleSubscribe("premium")}
           />
         </div>
 

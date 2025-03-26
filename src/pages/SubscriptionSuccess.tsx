@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { verifySubscriptionPayment } from '@/api/subscriptionApi';
+import { verifySubscriptionStatus } from '@/api/subscriptionApi';
 import { useToast } from '@/hooks/use-toast';
 import Footer from '@/components/Footer';
 
@@ -16,24 +16,25 @@ const SubscriptionSuccess: React.FC = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Parse transaction ID from the URL
-    const params = new URLSearchParams(location.search);
-    const transactionId = params.get('transactionId');
-    
     const verifyPayment = async () => {
-      if (!transactionId || !currentUser) {
+      if (!currentUser) {
         setIsVerifying(false);
         setIsSuccess(false);
+        toast({
+          title: "Authentication Error",
+          description: "Please log in again to verify your subscription.",
+          variant: "destructive"
+        });
         return;
       }
       
       try {
-        // Call the verification API
-        const success = await verifySubscriptionPayment(currentUser, transactionId);
+        // Verify subscription status
+        const isPremium = await verifySubscriptionStatus(currentUser);
         
-        setIsSuccess(success);
+        setIsSuccess(isPremium);
         
-        if (success) {
+        if (isPremium) {
           toast({
             title: "Subscription Activated",
             description: "Your premium subscription has been successfully activated!",
@@ -61,7 +62,7 @@ const SubscriptionSuccess: React.FC = () => {
     };
     
     verifyPayment();
-  }, [location.search, currentUser, toast]);
+  }, [currentUser, toast]);
 
   return (
     <div className="min-h-screen flex flex-col">
