@@ -178,3 +178,30 @@ For questions, feedback, or support, please contact us at blendarabic@gmail.com.
 ---
 
 Developed with ❤️ by the Blend.Ar team
+
+
+# Firebase commands
+Deploy static files
+```bash
+yarn build && firebase deploy --only hosting
+```
+
+Run cloud function and firebase emulator:
+```bash
+firebase emulators:start
+```
+
+Deploy cloud functions
+```bash
+firebase deploy --only functions
+```
+
+Update OpenAI key acess:
+```bash
+firebase functions:secrets:set OPENAI_API_KEY
+```
+
+Read the OpenAI key:
+```bash
+firebase functions:secrets:access OPENAI_API_KEY
+```

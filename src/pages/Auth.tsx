@@ -268,7 +268,7 @@ const Auth: React.FC = () => {
         return {
           icon: <Mail className="h-8 w-8 text-brand-bordeaux" />,
           title: "התחברות למערכת",
-          description: "התחבר באמצעות אימייל או Google"
+          description: "התחבר באמצעות Google"
         };
       case 'name':
         return {
@@ -317,7 +317,7 @@ const Auth: React.FC = () => {
             </div>
           </CardHeader>
 
-          <CardContent className="p-6 pt-0">
+          {/* <CardContent className="p-6 pt-0">
             {step === 'email' && (
               <form onSubmit={handleEmailSubmit} className="space-y-4" dir="rtl">
                 <div className="space-y-2">
@@ -438,11 +438,11 @@ const Auth: React.FC = () => {
                 </div>
               </div>
             )}
-          </CardContent>
+          </CardContent> */}
 
           <CardFooter className="flex flex-col p-6 pt-0">
             <div className="flex flex-col w-full mt-4 items-center">
-              <div className="relative w-full text-center my-4">
+              {/* <div className="relative w-full text-center my-4">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-gray-300 dark:border-gray-700"></div>
                 </div>
@@ -451,7 +451,7 @@ const Auth: React.FC = () => {
                     או
                   </span>
                 </div>
-              </div>
+              </div> */}
               
               <Button
                 onClick={handleGoogleLogin}
