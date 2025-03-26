@@ -72,51 +72,74 @@ const Subscription: React.FC = () => {
     return yearlyBilling ? 'yearly' : 'monthly';
   };
 
-  // Updated handleSubscribe function in src/pages/Subscription.tsx
-const handleSubscribe = async (plan: 'basic' | 'premium') => {
-  if (!isAuthenticated) {
-    toast({
-      title: "Please login",
-      description: "You need to be logged in to subscribe.",
-      variant: "default"
-    });
-    navigate('/auth');
-    return;
-  }
-  
-  // Check if already subscribed to the same plan
-  if (subscription?.plan === plan && 
-      subscription?.billingCycle === getBillingCycle() &&
-      subscription?.status === 'active') {
-    toast({
-      title: "Already subscribed",
-      description: "You are already subscribed to this plan.",
-      variant: "default"
-    });
-    return;
-  }
-  
-  setIsLoading(true);
-  
-  try {
-    // For basic plan, no payment needed
-    if (plan === 'basic') {
+  // Updated handleSubscribe function with proper error handling
+  const handleSubscribe = async (plan: 'basic' | 'premium') => {
+    if (!isAuthenticated) {
       toast({
-        title: "Basic Plan Activated",
-        description: "You are now on the Basic plan.",
+        title: "Please login",
+        description: "You need to be logged in to subscribe.",
         variant: "default"
       });
-      navigate('/chat');
-    } else {
+      navigate('/auth');
+      return;
+    }
+    
+    // Check if already subscribed to the same plan
+    if (subscription?.plan === plan && 
+        subscription?.billingCycle === getBillingCycle() &&
+        subscription?.status === 'active') {
+      toast({
+        title: "Already subscribed",
+        description: "You are already subscribed to this plan.",
+        variant: "default"
+      });
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    try {
+      // For basic plan, no payment needed
+      if (plan === 'basic') {
+        toast({
+          title: "Basic Plan Activated",
+          description: "You are now on the Basic plan.",
+          variant: "default"
+        });
+        navigate('/chat');
+        return;
+      }
+      
       // For premium, show payment checkout
       const price = getPlanPrice('premium', getBillingCycle());
       
       // Get authentication token from storage
       const token = localStorage.getItem('authToken') || 
-                    sessionStorage.getItem('authToken') || 
-                    '';
+                   sessionStorage.getItem('authToken') || 
+                   '';
       
-      const response = await fetch('/create-checkout-session', {
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      // First check if the API endpoint is available
+      try {
+        const checkResponse = await fetch('/api/healthcheck', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!checkResponse.ok) {
+          console.warn('API health check failed, service might be unavailable');
+        }
+      } catch (checkError) {
+        console.warn('API health check failed:', checkError);
+        // Continue anyway, the actual request might still work
+      }
+                   
+      const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -132,26 +155,43 @@ const handleSubscribe = async (plan: 'basic' | 'premium') => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create checkout session');
+        let errorMessage = 'Failed to create checkout session';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          // If the response isn't JSON, just use the status text
+          errorMessage = `${errorMessage}: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
       }
 
-      const { sessionUrl } = await response.json();
+      // Make sure we can parse the response as JSON
+      let sessionData;
+      try {
+        sessionData = await response.json();
+      } catch (jsonError) {
+        console.error('Error parsing checkout response:', jsonError);
+        throw new Error('Invalid response from server');
+      }
+
+      if (!sessionData || !sessionData.sessionUrl) {
+        throw new Error('Missing session URL in checkout response');
+      }
       
       // Redirect to Payment Checkout
-      window.location.href = sessionUrl;
+      window.location.href = sessionData.sessionUrl;
+    } catch (error) {
+      console.error('Subscription error:', error);
+      toast({
+        title: "Subscription Failed",
+        description: "There was an error processing your subscription. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
     }
-  } catch (error) {
-    console.error('Subscription error:', error);
-    toast({
-      title: "Subscription Failed",
-      description: "There was an error processing your subscription. Please try again.",
-      variant: "destructive"
-    });
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
   
   const handleCancelSubscription = async () => {
     setIsCancelling(true);
@@ -223,97 +263,97 @@ const handleSubscribe = async (plan: 'basic' | 'premium') => {
   };
 
   // Enhanced SubscriptionInfo component with more prominent cancel button
-
-const SubscriptionInfo = () => {
-  if (isLoadingSubscription) {
+  const SubscriptionInfo = () => {
+    if (isLoadingSubscription) {
+      return (
+        <div className="flex justify-center items-center my-8 p-6">
+          <Loader2 className="h-8 w-8 animate-spin text-brand-bordeaux" />
+        </div>
+      );
+    }
+    
+    if (!subscription) {
+      return null;
+    }
+    
     return (
-      <div className="flex justify-center items-center my-8 p-6">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-bordeaux" />
-      </div>
-    );
-  }
-  
-  if (!subscription) {
-    return null;
-  }
-  
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }} 
-      animate={{ opacity: 1 }}
-      className="bg-white/80 dark:bg-black/20 backdrop-blur-sm p-6 rounded-xl border border-brand-bordeaux/20 mb-12 max-w-2xl mx-auto"
-    >
-      <div className="flex items-center gap-3 mb-4">
-        {subscription.plan === 'premium' ? (
-          <Star className="h-6 w-6 text-brand-yellow" />
-        ) : (
-          <BadgeDollarSign className="h-6 w-6 text-brand-bordeaux" />
-        )}
-        <h3 className="text-xl font-bold">
-          Current Subscription: {subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)}
-        </h3>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <p className="text-sm text-muted-foreground">Status</p>
-          <p className={`font-medium ${isActive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-            {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
-          </p>
+      <motion.div 
+        initial={{ opacity: 0 }} 
+        animate={{ opacity: 1 }}
+        className="bg-white/80 dark:bg-black/20 backdrop-blur-sm p-6 rounded-xl border border-brand-bordeaux/20 mb-12 max-w-2xl mx-auto"
+      >
+        <div className="flex items-center gap-3 mb-4">
+          {subscription.plan === 'premium' ? (
+            <Star className="h-6 w-6 text-brand-yellow" />
+          ) : (
+            <BadgeDollarSign className="h-6 w-6 text-brand-bordeaux" />
+          )}
+          <h3 className="text-xl font-bold">
+            Current Subscription: {subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)}
+          </h3>
         </div>
         
-        <div>
-          <p className="text-sm text-muted-foreground">Billing Cycle</p>
-          <p className="font-medium">
-            {subscription.billingCycle.charAt(0).toUpperCase() + subscription.billingCycle.slice(1)}
-          </p>
-        </div>
-        
-        <div>
-          <p className="text-sm text-muted-foreground">Started On</p>
-          <p className="font-medium">{formatDate(subscription.startDate)}</p>
-        </div>
-        
-        <div>
-          <p className="text-sm text-muted-foreground">Expires On</p>
-          <p className="font-medium">{formatDate(subscription.endDate)}</p>
-        </div>
-      </div>
-      
-      {isActive && (
-        <div className="mt-4 p-3 bg-brand-yellow/20 rounded-lg">
-          <p className="text-sm text-brand-darkGray">
-            {subscription.autoRenew 
-              ? `Your subscription will automatically renew ${subscription.billingCycle === 'monthly' ? 'each month' : 'annually'}.` 
-              : `Your subscription will expire in ${getRemainingDays()} days.`}
-          </p>
-        </div>
-      )}
-      
-      {isActive && subscription.plan !== 'basic' && (
-        <div className="mt-8 border-t pt-6 border-brand-bordeaux/10">
-          <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
-            <div>
-              <h4 className="font-medium text-lg mb-1">Manage Subscription</h4>
-              <p className="text-sm text-muted-foreground">
-                You can cancel your subscription at any time. You'll retain access until {formatDate(subscription.endDate)}.
-              </p>
-            </div>
-            
-            <Button 
-              variant="outline" 
-              className="text-red-600 border-red-600 hover:bg-red-50 hover:border-red-800 px-6 py-2 font-medium flex items-center gap-2"
-              onClick={() => setShowCancelDialog(true)}
-            >
-              <XCircle size={18} />
-              Cancel Subscription
-            </Button>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <p className="text-sm text-muted-foreground">Status</p>
+            <p className={`font-medium ${isActive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+              {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
+            </p>
+          </div>
+          
+          <div>
+            <p className="text-sm text-muted-foreground">Billing Cycle</p>
+            <p className="font-medium">
+              {subscription.billingCycle.charAt(0).toUpperCase() + subscription.billingCycle.slice(1)}
+            </p>
+          </div>
+          
+          <div>
+            <p className="text-sm text-muted-foreground">Started On</p>
+            <p className="font-medium">{formatDate(subscription.startDate)}</p>
+          </div>
+          
+          <div>
+            <p className="text-sm text-muted-foreground">Expires On</p>
+            <p className="font-medium">{formatDate(subscription.endDate)}</p>
           </div>
         </div>
-      )}
-    </motion.div>
-  );
-};
+        
+        {isActive && (
+          <div className="mt-4 p-3 bg-brand-yellow/20 rounded-lg">
+            <p className="text-sm text-brand-darkGray">
+              {subscription.autoRenew 
+                ? `Your subscription will automatically renew ${subscription.billingCycle === 'monthly' ? 'each month' : 'annually'}.` 
+                : `Your subscription will expire in ${getRemainingDays()} days.`}
+            </p>
+          </div>
+        )}
+        
+        {isActive && subscription.plan !== 'basic' && (
+          <div className="mt-8 border-t pt-6 border-brand-bordeaux/10">
+            <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
+              <div>
+                <h4 className="font-medium text-lg mb-1">Manage Subscription</h4>
+                <p className="text-sm text-muted-foreground">
+                  You can cancel your subscription at any time. You'll retain access until {formatDate(subscription.endDate)}.
+                </p>
+              </div>
+              
+              <Button 
+                variant="outline" 
+                className="text-red-600 border-red-600 hover:bg-red-50 hover:border-red-800 px-6 py-2 font-medium flex items-center gap-2"
+                onClick={() => setShowCancelDialog(true)}
+              >
+                <XCircle size={18} />
+                Cancel Subscription
+              </Button>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    );
+  };
+  
   return (
     <div className="min-h-screen py-16 px-4 sm:px-6 lg:px-8 bg-brand-background dark:bg-brand-darkGray">
       {/* Decorative background elements */}

@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -123,6 +122,9 @@ const PreferencesPopup: React.FC<PreferencesPopupProps> = ({ onSave, isOpen }) =
             </span>
             User Preferences
           </DialogTitle>
+          <DialogDescription>
+            Customize your learning experience with these settings
+          </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-5 py-4">

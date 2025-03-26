@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import Cookies from "js-cookie";
 import { app } from "../config/firebaseConfig";
+import { useNavigate } from "react-router-dom";
 
 interface AuthContextType {
   currentUser: string | null;

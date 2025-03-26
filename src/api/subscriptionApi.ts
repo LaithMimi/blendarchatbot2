@@ -110,6 +110,11 @@ export const cancelSubscription = async (userId: string): Promise<boolean> => {
  * Get current subscription for a user
  */
 export const getUserSubscription = async (userId: string): Promise<SubscriptionData | null> => {
+  if (!userId) {
+    console.error('No user ID provided to getUserSubscription');
+    return null;
+  }
+  
   try {
     // First, check if userId is an email, and if so, encode it properly
     if (userId.includes('@')) {
@@ -131,11 +136,17 @@ export const getUserSubscription = async (userId: string): Promise<SubscriptionD
     
     // If there's a permission error, try to get subscription through the API
     try {
+      const token = localStorage.getItem('authToken') || sessionStorage.getItem('authToken');
+      if (!token) {
+        console.error('No auth token found, cannot fetch subscription info');
+        return null;
+      }
+      
       const response = await fetch('/api/subscription/info', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken') || sessionStorage.getItem('authToken')}`
+          'Authorization': `Bearer ${token}`
         }
       });
       
@@ -152,6 +163,7 @@ export const getUserSubscription = async (userId: string): Promise<SubscriptionD
     return null;
   }
 };
+
 // Add a helper function to encode email properly for Firestore IDs
 export const encodeEmail = (email: string): string => {
   try {
@@ -164,6 +176,7 @@ export const encodeEmail = (email: string): string => {
     return email;
   }
 };
+
 /**
  * Upgrade or downgrade a subscription
  */
@@ -227,6 +240,11 @@ export const getPlanPrice = (plan: SubscriptionPlan, billingCycle: BillingCycle)
  * Check if user has an active subscription
  */
 export const hasActiveSubscription = async (userId: string): Promise<boolean> => {
+  if (!userId) {
+    console.error('No user ID provided to hasActiveSubscription');
+    return false;
+  }
+  
   try {
     // First try direct verification through the subscription status API endpoint
     const functions = getFunctions();

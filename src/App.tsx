@@ -3,7 +3,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { 
+  BrowserRouter, 
+  Routes, 
+  Route, 
+  Navigate,
+  createRoutesFromElements
+} from "react-router-dom";
 import Index from "./pages/Index";
 import Chat from "./pages/Chat";
 import Auth from "./pages/Auth";
@@ -15,6 +21,8 @@ import Subscription from "./pages/Subscription";
 import SubscriptionSuccess from "./pages/SubscriptionSuccess";
 import SubscriptionCancel from "./pages/SubscriptionCancel";
 import { useAuth } from "./contexts/AuthContext";
+
+// Enable React Router Future Flags
 const queryClient = new QueryClient();
 
 // Protected Route component
@@ -57,13 +65,15 @@ const AppContent = () => {
         <Route path="/auth" element={
           isAuthenticated ? <Navigate to="/chat" replace /> : <Auth />
         } />
-        <Route path="/auth/complete" element={<AuthComplete />} /> {/* Add the new route */}
+        <Route path="/auth/complete" element={<AuthComplete />} />
         <Route path="/chat" element={
           <ProtectedRoute>
             <Chat />
           </ProtectedRoute>
         } />
         <Route path="/subscription" element={<Subscription />} />
+        <Route path="/subscription/success" element={<SubscriptionSuccess />} />
+        <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
         <Route path="/admin/chat-logs" element={<ChatLogs />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
