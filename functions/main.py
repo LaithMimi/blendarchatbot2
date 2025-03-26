@@ -6,7 +6,62 @@ from datetime import datetime, timezone, timedelta
 
 
 initialize_app()
+"""
+Payment URL: https://meshulam.co.il/purchase?b=511448e20886c18a4bab323430775fb8
+Meshulam documentation: https://grow-il.readme.io/docs/overview-7
 
+Example of a payment webhook from Meshulam:
+{
+    "webhookKey":"ABC1234",
+    "transactionCode":"ABCD1234",
+    "transactionType":"אשראי", 
+    "paymentSum":8,
+    "paymentsNum":0,
+    "allPaymentNum":1,
+    "firstPaymentSum":0,
+    "periodicalPaymentSum":0,
+    "paymentType":"הוראת קבע",
+    "paymentDate":"14/10/21",
+    "asmachta":"123456789",
+    "paymentDesc":"שם העמוד",
+    "fullName":"Full Name",
+    "payerPhone":"0500000000",
+    "payerEmail":"test@test.com",
+    "cardSuffix":"1234",
+    "cardBrand":"Mastercard",
+    "cardType":"Local",
+    "paymentSource":"עמוד מכירה",
+    "purchasePageKey":"ABCD1234",
+    "purchasePageTitle":"עמוד תבנית תשלום מהיר",
+    "amount":1,
+    "purchaseCustomField":{"field1":"נתון1","field2":"נתון2","field3":"נתון3"}
+}
+
+Example of a recurring payment webhook from Meshulam:
+{ 
+  "webhookKey":"ABC1234", 
+  "transactionCode":"ABCD1234", 
+  "transactionType":"אשראי",  
+  "paymentSum":8, 
+  "paymentsNum":0, 
+  "allPaymentNum":1, 
+  "firstPaymentSum":0, 
+  "periodicalPaymentSum":0, 
+  "paymentType":"הוראת קבע", 
+  "paymentDate":"14/10/21",
+  "asmachta":"123456789", 
+  "paymentDesc":"תיאור עסקה",
+  "fullName":"Full Name", 
+  "payerPhone":"0500000000", 
+  "payerEmail":"test@test.com", 
+	"cardSuffix":"1234", 
+	"cardBrand":"Mastercard", 
+	"cardType":"Local", 
+	"paymentSource":"ריצת הוראת קבע", 
+	"directDebitId":"123456" (קוד הוראת קבע ולא קוד עסקה) 
+}
+* If recurring payment failed, the payload will contain: error_message
+"""
 
 @https_fn.on_request()
 def on_user_purchase(req: https_fn.Request) -> https_fn.Response:
