@@ -556,3 +556,4 @@ def get_chat_logs(req: https_fn.Request) -> https_fn.Response:
 def get_current_month():
     now = datetime.now()
     return f"{now.year}-{now.month}"
+
