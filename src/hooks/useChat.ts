@@ -178,7 +178,7 @@ export const useChat = () => {
   const addLimitReachedMessage = () => {
     const limitMessage = {
       id: Date.now().toString(),
-      content: "You've reached the limit of free messages for today. Upgrade to Premium for unlimited messages and additional features. Click the button below to upgrade and continue your Arabic learning journey without interruptions.",
+      content: "הגעת למגבלת ההודעות החינמיות להיום. שדרג לחשבון פרימיום להודעות ללא הגבלה ותכונות נוספות. לחץ על הכפתור למטה כדי לשדרג ולהמשיך את מסע הלמידה שלך בערבית ללא הפרעות.",
       isUser: false,
       timestamp: new Date()
     };
