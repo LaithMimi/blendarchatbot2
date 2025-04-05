@@ -708,40 +708,11 @@ def api_chatlogs(req: https_fn.Request) -> https_fn.Response:
         
         if req.method == "GET":
             return handle_get_all_chatlogs(req)
+        if method == "DELETE":
+            return handle_delete_all_chatlogs()
 
-        # Handle legacy endpoint
-        if path == "getChatLogs" or path == "get_chat_logs":
-            if method == "GET":
-                return handle_get_all_chatlogs(req)
-            else:
-                return https_fn.Response("Method Not Allowed", status=HTTP_STATUS["BAD_REQUEST"])
+        return https_fn.Response("Method Not Allowed", status=HTTP_STATUS["BAD_REQUEST"])
 
-        # Handle API endpoint paths
-        if len(parts) >= 2 and parts[0] == "api" and parts[1] == "chatlogs":
-            # If length >= 3, then we have /api/chatlogs/<sessionId> 
-            if len(parts) >= 3:
-                session_id = parts[2]
-
-            # -------------------------------------------------
-            # GET /api/chatlogs  or  GET /api/chatlogs/<sessionId>
-            # -------------------------------------------------
-            if method == "GET":
-                if session_id:
-                    return handle_get_single_chat(session_id)
-                else:
-                    return handle_get_all_chatlogs(req)
-
-            # -------------------------------------------------
-            # DELETE /api/chatlogs  or  DELETE /api/chatlogs/<sessionId>
-            # -------------------------------------------------
-            if method == "DELETE":
-                if session_id:
-                    return handle_delete_single_chat(session_id)
-                else:
-                    return handle_delete_all_chatlogs()
-
-        # If it doesn't match the above, return 405
-        return https_fn.Response("Method Not Allowed", status=405)
     except Exception as e:
         logger.error(f"API chatlogs error: {str(e)}", exc_info=True)
         return https_fn.Response(json.dumps({"error": str(e)}), status=HTTP_STATUS["SERVER_ERROR"])
