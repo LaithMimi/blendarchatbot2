@@ -26,7 +26,10 @@ export interface ChatSession {
   [key: string]: any;
 }
 
-const ASK_API_URL = process.env.NODE_ENV === 'production' ? "https://ask-user-jfys4ba3ka-uc.a.run.app" : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/ask_user";
+// const ASK_API_URL = process.env.NODE_ENV === 'production' ? "https://ask-user-jfys4ba3ka-uc.a.run.app" : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/ask_user";
+const ASK_API_URL = import.meta.env.MODE === 'production'
+  ? "https://us-central1-arabicchatbot-24bb2.cloudfunctions.net/ask_user"
+  : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/ask_user";
 
 /**
  * Sends a question to the chatbot API and returns the response

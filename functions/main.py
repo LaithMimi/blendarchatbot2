@@ -10,13 +10,32 @@ import uuid
 from openai import OpenAI
 from dotenv import load_dotenv
 
+OPENAI_API_KEY = SecretParam("OPENAI_API_KEY")
+# CORS_ORIGINS = ["https://chat\.blendarabic\.com", "http://localhost:8050"]
+CORS_ORIGINS = ["https://chat.blendarabic.com", "http://localhost:8050"]
+MAX_MONTHLY_MESSAGES = 50
 load_dotenv()
 
-OPENAI_API_KEY = SecretParam("OPENAI_API_KEY")
-CORS_ORIGINS = ["https://chat\.blendarabic\.com", "http://localhost:8050"]
-MAX_MONTHLY_MESSAGES = 50
+DEFAULT_WEEK = "01"
+DEFAULT_LEVEL = "beginner"
+DEFAULT_GENDER = "male"
+DEFAULT_LANGUAGE = "Hebrew"
+# Constants
+
+HTTP_STATUS = {
+    "OK": 200,
+    "BAD_REQUEST": 400,
+    "UNAUTHORIZED": 401,
+    "FORBIDDEN": 403,
+    "NOT_FOUND": 404,
+    "SERVER_ERROR": 500
+}
+
+# Global variables
+_firestore_client = None
 
 initialize_app()
+
 """
 Payment URL: https://meshulam.co.il/purchase?b=511448e20886c18a4bab323430775fb8
 Meshulam documentation: https://grow-il.readme.io/docs/overview-7
@@ -65,11 +84,11 @@ Example of a recurring payment webhook from Meshulam:
   "fullName":"Full Name", 
   "payerPhone":"0500000000", 
   "payerEmail":"test@test.com", 
-	"cardSuffix":"1234", 
-	"cardBrand":"Mastercard", 
-	"cardType":"Local", 
-	"paymentSource":"ריצת הוראת קבע", 
-	"directDebitId":"123456" (קוד הוראת קבע ולא קוד עסקה) 
+  "cardSuffix":"1234", 
+  "cardBrand":"Mastercard", 
+  "cardType":"Local", 
+  "paymentSource":"ריצת הוראת קבע", 
+  "directDebitId":"123456" (קוד הוראת קבע ולא קוד עסקה) 
 }
 * If recurring payment failed, the payload will contain: error_message
 
@@ -78,28 +97,50 @@ Function URL: https://on-user-purchase-jfys4ba3ka-uc.a.run.app
 
 
 # Utility functions
+def get_utc_timestamp():
+    """Generate a consistent UTC timestamp in ISO format"""
+    return datetime.now(timezone.utc).isoformat()
+
+def get_firestore_client():
+    """Get or create a Firestore client instance (singleton pattern)"""
+    global _firestore_client
+    if _firestore_client is None:
+        _firestore_client = firestore.client()
+    return _firestore_client
+
 def get_current_month():
     now = datetime.now()
     return f"{now.year}-{now.month}"
 
+def get_text_direction(language: str) -> str:
+    """Determine text direction based on language."""
+    rtl_languages = ['arabic', 'hebrew', 'urdu', 'farsi', 'persian']
+    return "rtl" if language.lower() in rtl_languages else "ltr"
 
-def verify_auth(req: https_fn.Request) -> tuple[str, str]:
+def validate_request(req_data, required_fields):
+    """Validate that request contains all required fields."""
+    missing_fields = [field for field in required_fields if field not in req_data]
+    if missing_fields:
+        return False, f"Missing required fields: {', '.join(missing_fields)}"
+    return True, ""
+
+def verify_auth(req: https_fn.Request) -> tuple[bool, str, str]:
     """
     Verify the JWT token from the Authorization header and return user
-    information. Returns empty strings if verification fails.
+    information along with authentication status.
     
     Args:
         req: The HTTP request object
         
     Returns:
-        tuple[str, str]: A tuple containing (user_id, user_email). Both will be empty strings if verification fails.
+        tuple[bool, str, str]: A tuple containing (is_authenticated, user_id, user_email)
     """
     try:
         # Get the Authorization header
         auth_header = req.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
-            logger.warning("No valid Authorization header found")
-            return '', ''
+            logger.info("No valid Authorization header found")
+            return False, '', ''
             
         # Extract the token
         token = auth_header.split('Bearer ')[1]
@@ -112,11 +153,11 @@ def verify_auth(req: https_fn.Request) -> tuple[str, str]:
         user_email = decoded_token.get('email', '')
         
         logger.info(f"Successfully verified token for user, user_id = {user_id}, user_email = {user_email}")
-        return user_id, user_email
+        return True, user_id, user_email
         
     except Exception as e:
         logger.error(f"Error verifying auth token: {str(e)}")
-        return '', ''
+        return False, '', ''
 
 
 def get_materials(level, week):
@@ -127,7 +168,7 @@ def get_materials(level, week):
         logger.info(f"Searching for materials with lesson key: {lesson_key}")
 
         # Query for documents where the ID starts with the lesson key
-        db = firestore.client()
+        db = get_firestore_client()
         docs = db.collection("materials").where("id", ">=", lesson_key).where("id", "<", lesson_key + "_z").stream()
 
         # Convert to list of dictionaries
@@ -204,28 +245,37 @@ def create_arabic_teaching_prompt(level, week, question, gender, language, mater
 
 
 def call_bot(api_key, prompt, question):
-    client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model="gpt-4-turbo",
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": question}
-        ],
-        temperature=0.3,
-        max_tokens=1000
-    )
-    bot_answer = response.choices[0].message.content
-    return {
-        "id": str(uuid.uuid4()),
-        "sender": "bot",
-        "text": bot_answer,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "isUser": False
-    }
+    """Call OpenAI API with improved error handling."""
+    if not api_key:
+        logger.error("Missing OpenAI API key")
+        raise ValueError("OpenAI API key is required")
+        
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": question}
+            ],
+            temperature=0.3,
+            max_tokens=1000
+        )
+        bot_answer = response.choices[0].message.content
+        return {
+            "id": str(uuid.uuid4()),
+            "sender": "bot",
+            "text": bot_answer,
+            "timestamp": get_utc_timestamp(),
+            "isUser": False
+        }
+    except Exception as e:
+        logger.error(f"Error calling OpenAI: {str(e)}", exc_info=True)
+        raise RuntimeError(f"Failed to generate bot response: {str(e)}")
 
 
 def load_session(user_id: str, user_email: str, level: str, week: str, gender: str, language: str):
-    db = firestore.client()
+    db = get_firestore_client()
     session_id = user_id
     user_doc = db.collection('chatLogs').document(session_id).get()
     if user_doc.exists:
@@ -238,8 +288,8 @@ def load_session(user_id: str, user_email: str, level: str, week: str, gender: s
         "userEmail": user_email,
         "userName": userName,
         "messages": [],
-        "createdAt": datetime.now(timezone.utc).isoformat(),
-        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "createdAt": get_utc_timestamp(),
+        "updatedAt": get_utc_timestamp(),
         "level": level,
         "language": language,
         "week": week,
@@ -251,9 +301,9 @@ def load_session(user_id: str, user_email: str, level: str, week: str, gender: s
 
 def add_messages_to_session(session, messages):
     session['messages'] = session.get("messages", []) + messages
-    session['updatedAt'] = datetime.now(timezone.utc).isoformat()
+    session['updatedAt'] = get_utc_timestamp()
 
-    db = firestore.client()
+    db = get_firestore_client()
     session_id = session['_id']
     db.collection('chatLogs').document(session_id).update({
         'messages': firestore.ArrayUnion(messages),
@@ -265,7 +315,7 @@ def add_messages_to_session(session, messages):
 
 def can_user_ask(user_id: str) -> bool:
     current_month = get_current_month()
-    db = firestore.client()
+    db = get_firestore_client()
     user_doc = db.collection('users').document(user_id).get()
     if not user_doc.exists:
         db.collection('users').document(user_id).set({
@@ -286,7 +336,7 @@ def can_user_ask(user_id: str) -> bool:
 
 def increase_user_message_count(user_id: str):
     current_month = get_current_month()
-    db = firestore.client()
+    db = get_firestore_client()
     user_doc = db.collection('users').document(user_id).get()
     if not user_doc.exists:
         return
@@ -302,7 +352,7 @@ def increase_user_message_count(user_id: str):
 
 
 # Chat logs handler functions
-def handle_get_all_chatlogs(db, req: https_fn.Request) -> https_fn.Response:
+def handle_get_all_chatlogs(req: https_fn.Request) -> https_fn.Response:
     """
     Handles GET requests for chat logs with filtering and pagination
     """
@@ -315,12 +365,35 @@ def handle_get_all_chatlogs(db, req: https_fn.Request) -> https_fn.Response:
     date_to = req.args.get("dateTo")
     email_filter = req.args.get("userEmail", "").lower()
 
-    chat_docs = db.collection("chatLogs").stream()
-    chat_logs = [doc.to_dict() for doc in chat_docs]
-    logger.info(f"Retrieved {len(chat_logs)} chat logs")
-
-    # Apply filters
+    # Get Firestore client
+    db = get_firestore_client()
+    
+    # Start with base query
+    query = db.collection("chatLogs")
+    
+    # Apply database-level filters for better performance
+    if user_filter:
+        query = query.where("userId", "==", user_filter)
+    if email_filter:
+        query = query.where("userEmail", "==", email_filter)
+        
+    # Date filtering
+    if date_from and date_to:
+        try:
+            from_dt = datetime.fromisoformat(date_from)
+            to_dt = datetime.fromisoformat(date_to)
+            query = query.where("createdAt", ">=", from_dt.isoformat()).where("createdAt", "<=", to_dt.isoformat())
+        except Exception as date_err:
+            logger.error(f"Date parsing error: {date_err}")
+    
+    # Sort by creation date
+    query = query.order_by("createdAt", direction=firestore.Query.DESCENDING)
+    
+    # Only load all docs if text search is needed
     if search_term:
+        # Full text search requires in-memory filtering
+        chat_logs = [doc.to_dict() for doc in query.stream()]
+        # Filter in memory
         chat_logs = [
             c for c in chat_logs
             if search_term in c.get("userName", "").lower()
@@ -328,73 +401,74 @@ def handle_get_all_chatlogs(db, req: https_fn.Request) -> https_fn.Response:
             or search_term in c.get("userEmail", "").lower()
             or search_term in c.get("_id", "").lower()
         ]
-    if user_filter:
-        chat_logs = [c for c in chat_logs if user_filter in c.get("userId", "").lower()]
-    if email_filter:
-        chat_logs = [c for c in chat_logs if email_filter in c.get("userEmail", "").lower()]
+        # Manual pagination
+        total = len(chat_logs)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_logs = chat_logs[start:end]
+    else:
+        # Get all documents for counting (could be optimized with a count function)
+        all_docs = [doc.id for doc in query.stream()]
+        total = len(all_docs)
+        # Get paginated results
+        paginated_logs = [doc.to_dict() for doc in query.limit(page_size).offset((page - 1) * page_size).stream()]
 
-    if date_from and date_to:
-        try:
-            from_dt = datetime.fromisoformat(date_from)
-            to_dt = datetime.fromisoformat(date_to)
-            def in_range(chat):
-                created = chat.get("createdAt")
-                if not created:
-                    return False
-                dt = datetime.fromisoformat(created)
-                return from_dt <= dt <= to_dt
-            chat_logs = [c for c in chat_logs if in_range(c)]
-        except Exception as date_err:
-            logger.error(f"Date parsing error: {date_err}")
-
-    chat_logs.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
-
-    # Pagination
-    total = len(chat_logs)
     total_pages = (total + page_size - 1) // page_size
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated_logs = chat_logs[start:end]
 
     return https_fn.Response(json.dumps({
         "chats": paginated_logs,
         "totalPages": total_pages
-    }), status=200)
+    }), status=HTTP_STATUS["OK"])
 
 
-def handle_get_single_chat(db, session_id: str) -> https_fn.Response:
+def handle_get_single_chat(session_id: str) -> https_fn.Response:
     """GET /api/chatlogs/<sessionId>"""
+    db = get_firestore_client()
     doc_ref = db.collection("chatLogs").document(session_id)
     doc = doc_ref.get()
     if not doc.exists:
-        return https_fn.Response(json.dumps({"error": "Chat session not found"}), status=404)
-    return https_fn.Response(json.dumps(doc.to_dict()), status=200)
+        return https_fn.Response(json.dumps({"error": "Chat session not found"}), status=HTTP_STATUS["NOT_FOUND"])
+    return https_fn.Response(json.dumps(doc.to_dict()), status=HTTP_STATUS["OK"])
 
 
-def handle_delete_all_chatlogs(db) -> https_fn.Response:
+def handle_delete_all_chatlogs() -> https_fn.Response:
     """DELETE /api/chatlogs"""
     try:
+        db = get_firestore_client()
         docs = db.collection("chatLogs").stream()
         batch = db.batch()
+        delete_count = 0
+        
         for d in docs:
             batch.delete(d.reference)
-        batch.commit()
+            delete_count += 1
+            # Firestore has a limit of 500 operations per batch
+            if delete_count >= 450:
+                batch.commit()
+                batch = db.batch()
+                delete_count = 0
+                
+        # Commit any remaining operations
+        if delete_count > 0:
+            batch.commit()
+            
         logger.info("All chat logs deleted successfully")
-        return https_fn.Response(json.dumps({"success": True}), status=200)
+        return https_fn.Response(json.dumps({"success": True}), status=HTTP_STATUS["OK"])
     except Exception as e:
         logger.error(f"Error deleting all chat logs: {str(e)}", exc_info=True)
-        return https_fn.Response(json.dumps({"error": str(e)}), status=500)
+        return https_fn.Response(json.dumps({"error": str(e)}), status=HTTP_STATUS["SERVER_ERROR"])
 
 
-def handle_delete_single_chat(db, session_id: str) -> https_fn.Response:
+def handle_delete_single_chat(session_id: str) -> https_fn.Response:
     """DELETE /api/chatlogs/<sessionId>"""
+    db = get_firestore_client()
     doc_ref = db.collection("chatLogs").document(session_id)
     doc = doc_ref.get()
     if not doc.exists:
-        return https_fn.Response(json.dumps({"error": "Session not found"}), status=404)
+        return https_fn.Response(json.dumps({"error": "Session not found"}), status=HTTP_STATUS["NOT_FOUND"])
     doc_ref.delete()
     logger.info(f"Chat session {session_id} deleted successfully")
-    return https_fn.Response(json.dumps({"success": True}), status=200)
+    return https_fn.Response(json.dumps({"success": True}), status=HTTP_STATUS["OK"])
 
 
 # Main endpoint functions
@@ -404,24 +478,33 @@ def on_user_purchase(req: https_fn.Request) -> https_fn.Response:
         logger.info("Payment webhook received")
         
         # Parse the request body
+        if not req.is_json:
+            logger.error("Payment webhook received non-JSON data")
+            return https_fn.Response(json.dumps({'error': 'Invalid request format, JSON expected'}), status=HTTP_STATUS["BAD_REQUEST"])
+            
         request_data = req.get_json()
-        transaction_code = request_data.get('transactionCode', 'unknown')
+        
+        # Validate required fields
+        required_fields = ['transactionCode', 'payerEmail', 'paymentSum']
+        is_valid, error_msg = validate_request(request_data, required_fields)
+        if not is_valid:
+            logger.error(f"Payment webhook missing required fields: {error_msg}")
+            return https_fn.Response(json.dumps({'error': error_msg}), status=HTTP_STATUS["BAD_REQUEST"])
+        
+        transaction_code = request_data.get('transactionCode')
         payment_sum = request_data.get('paymentSum', 0)
         payment_type = request_data.get('paymentType', '')
         is_yearly = payment_type == 'yearly' or payment_sum >= 100  # Assume yearly if high amount
         
-        logger.info(f"Processing transaction: {transaction_code}", request_data=request_data)
+        logger.info(f"Processing transaction: {transaction_code}")
         
         # Extract payer email from request
         payer_email = request_data.get('payerEmail')
-        if not payer_email:
-            logger.error("Payment webhook missing payer email")
-            return https_fn.Response(json.dumps({'error': 'No payer email provided'}), status=400)
         
         logger.info(f"Processing payment for email: {payer_email}")
         
         # Get Firestore client
-        db = firestore.client()
+        db = get_firestore_client()
         
         # Try to find user by email
         user_id = None
@@ -464,8 +547,8 @@ def on_user_purchase(req: https_fn.Request) -> https_fn.Response:
             "status": "completed",
             "amount": payment_sum,
             "plan": "premium",
-            "createdAt": now.isoformat(),
-            "updatedAt": now.isoformat()
+            "createdAt": get_utc_timestamp(),
+            "updatedAt": get_utc_timestamp()
         }
         
         db.collection("payments").document(transaction_code).set(transaction_data)
@@ -478,7 +561,7 @@ def on_user_purchase(req: https_fn.Request) -> https_fn.Response:
             'email': payer_email,
             'subscriptionStatus': 'active',
             'subscriptionEndDate': end_date.isoformat(),
-            'updatedAt': now.isoformat()
+            'updatedAt': get_utc_timestamp()
         }, merge=True)
         
         # Create or update subscription record
@@ -488,13 +571,13 @@ def on_user_purchase(req: https_fn.Request) -> https_fn.Response:
             "plan": "premium",
             "billingCycle": "yearly" if is_yearly else "monthly",
             "status": "active",
-            "startDate": now.isoformat(),
+            "startDate": get_utc_timestamp(),
             "endDate": end_date.isoformat(),
             "autoRenew": True,
             "transactionId": transaction_code,
             "paymentMethod": "external",
-            "createdAt": now.isoformat(),
-            "updatedAt": now.isoformat()
+            "createdAt": get_utc_timestamp(),
+            "updatedAt": get_utc_timestamp()
         }
         
         db.collection("subscriptions").document(user_id).set(subscription_data, merge=True)
@@ -503,11 +586,11 @@ def on_user_purchase(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(json.dumps({
             'success': True,
             'userId': user_id
-        }), status=200)
+        }), status=HTTP_STATUS["OK"])
             
     except Exception as e:
-        logger.error(f"Error processing payment webhook: {str(e)}")
-        return https_fn.Response(json.dumps({'error': str(e)}), status=500)
+        logger.error(f"Error processing payment webhook: {str(e)}", exc_info=True)
+        return https_fn.Response(json.dumps({'error': str(e)}), status=HTTP_STATUS["SERVER_ERROR"])
 
 
 @https_fn.on_request(secrets=[OPENAI_API_KEY], cors=options.CorsOptions(cors_origins=CORS_ORIGINS, cors_methods=["get", "post"]))
@@ -516,7 +599,7 @@ def ask_user(req: https_fn.Request) -> https_fn.Response:
         logger.info("Ask user request received")
         # Handle health check request separately
         if req.path == "/__/health" and req.method == "GET":
-            return https_fn.Response(json.dumps({"status": "ok"}), status=200)
+            return https_fn.Response(json.dumps({"status": "ok"}), status=HTTP_STATUS["OK"])
 
         # Only try to parse JSON for non-health check requests
         if req.is_json:
@@ -526,56 +609,76 @@ def ask_user(req: https_fn.Request) -> https_fn.Response:
             request_data = {}
 
         # Parse the request body
-        week = request_data.get('week', '01')
-        level = request_data.get('level', 'beginner')
-        gender = request_data.get('gender', 'male')
-        language = request_data.get('language', 'Hebrew')
+        week = request_data.get('week', DEFAULT_WEEK)
+        level = request_data.get('level', DEFAULT_LEVEL)
+        gender = request_data.get('gender', DEFAULT_GENDER)
+        language = request_data.get('language', DEFAULT_LANGUAGE)
         question = request_data.get('question', '')
         if not question:
             logger.error("Question is required")
-            return https_fn.Response(json.dumps({'error': 'Question is required'}), status=400)
+            return https_fn.Response(json.dumps({'error': 'Question is required'}), status=HTTP_STATUS["BAD_REQUEST"])
 
-        # Verify authentication, limit the number of messages and increase the message count
-        user_id, user_email = verify_auth(req)
-        if not user_id or not user_email:
+        # Verify authentication
+        is_authenticated, user_id, user_email = verify_auth(req)
+        if not is_authenticated:
             logger.error("Authentication failed")
-            return https_fn.Response(json.dumps({'error': 'Authentication failed'}), status=401)
+            return https_fn.Response(json.dumps({'error': 'Authentication failed'}), status=HTTP_STATUS["UNAUTHORIZED"])
+        
+        # Check if user can ask questions
         if not can_user_ask(user_id):
             logger.error("User has reached the maximum number of messages")
-            return https_fn.Response(json.dumps({'error': 'User has reached the maximum number of messages'}), status=403)
-        increase_user_message_count(user_id)
-
+            return https_fn.Response(json.dumps({'error': 'User has reached the maximum number of messages'}), status=HTTP_STATUS["FORBIDDEN"])
+        
+        # Validate OpenAI API key
+        if not OPENAI_API_KEY.value:
+            logger.error("OpenAI API key not available")
+            return https_fn.Response(json.dumps({'error': 'Service configuration error'}), status=HTTP_STATUS["SERVER_ERROR"])
+            
         # Load conversation history and create a new message
         session = load_session(user_id, user_email, level, week, gender, language)
         conversation_history = session.get("messages", [])
+        
+        # Get materials and validate
         materials = get_materials(level, week)
+        if not materials:
+            logger.info(f"No materials found for level: {level}, week: {week}")
+        
+        # Generate prompt and get bot response
         prompt = create_arabic_teaching_prompt(level, week, question, gender, language, materials, conversation_history)
-        bot_message = call_bot(OPENAI_API_KEY.value, prompt, question)
+        
+        try:
+            bot_message = call_bot(OPENAI_API_KEY.value, prompt, question)
+        except Exception as e:
+            logger.error(f"Error calling bot: {str(e)}")
+            return https_fn.Response(json.dumps({'error': 'Failed to generate response'}), status=HTTP_STATUS["SERVER_ERROR"])
 
         # Create user message
         user_message = {
             "id": f"{user_id}_{str(uuid.uuid4())}",
             "sender": "user",
             "text": question,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": get_utc_timestamp(),
             "isUser": True
         }
         
         # Add both messages to session
         new_messages = [user_message, bot_message]
         session = add_messages_to_session(session, new_messages)
+        
+        # Increase message count
+        increase_user_message_count(user_id)
 
         return https_fn.Response(json.dumps({
             "answer": bot_message['text'],
             "language": language,
-            "direction": "rtl" if language == 'arabic' else "ltr",
+            "direction": get_text_direction(language),
             "_id": session['_id'],
             "sessionId": session['_id'],
             "chatSession": session
-        }), status=200)
+        }), status=HTTP_STATUS["OK"])
     except Exception as e:
-        logger.error(f"Error processing ask user request", error=e)
-        return https_fn.Response(json.dumps({'error': "An error occurred"}), status=500)
+        logger.error(f"Error processing ask user request: {str(e)}", exc_info=True)
+        return https_fn.Response(json.dumps({'error': "An error occurred"}), status=HTTP_STATUS["SERVER_ERROR"])
 
 
 @https_fn.on_request(
@@ -595,7 +698,6 @@ def api_chatlogs(req: https_fn.Request) -> https_fn.Response:
     - DELETE /api/chatlogs/<sessionId> (delete a single chat)
     """
     try:
-        db = firestore.client()
         path = req.path.strip("/")  # e.g. "api/chatlogs" or "api/chatlogs/abc123" or "getChatLogs"
         parts = path.split("/")  # e.g. ["api", "chatlogs"] or ["api", "chatlogs", "abc123"] or ["getChatLogs"]
 
@@ -609,9 +711,9 @@ def api_chatlogs(req: https_fn.Request) -> https_fn.Response:
         # Handle legacy endpoint
         if path == "getChatLogs" or path == "get_chat_logs":
             if method == "GET":
-                return handle_get_all_chatlogs(db, req)
+                return handle_get_all_chatlogs(req)
             else:
-                return https_fn.Response("Method Not Allowed", status=405)
+                return https_fn.Response("Method Not Allowed", status=HTTP_STATUS["BAD_REQUEST"])
 
         # Handle API endpoint paths
         if len(parts) >= 2 and parts[0] == "api" and parts[1] == "chatlogs":
@@ -624,21 +726,21 @@ def api_chatlogs(req: https_fn.Request) -> https_fn.Response:
             # -------------------------------------------------
             if method == "GET":
                 if session_id:
-                    return handle_get_single_chat(db, session_id)
+                    return handle_get_single_chat(session_id)
                 else:
-                    return handle_get_all_chatlogs(db, req)
+                    return handle_get_all_chatlogs(req)
 
             # -------------------------------------------------
             # DELETE /api/chatlogs  or  DELETE /api/chatlogs/<sessionId>
             # -------------------------------------------------
             if method == "DELETE":
                 if session_id:
-                    return handle_delete_single_chat(db, session_id)
+                    return handle_delete_single_chat(session_id)
                 else:
-                    return handle_delete_all_chatlogs(db)
+                    return handle_delete_all_chatlogs()
 
         # If it doesn't match the above, return 405
         return https_fn.Response("Method Not Allowed", status=405)
     except Exception as e:
-        logger.error(f"API chatlogs error: {str(e)}")
-        return https_fn.Response(json.dumps({"error": str(e)}), status=500)
+        logger.error(f"API chatlogs error: {str(e)}", exc_info=True)
+        return https_fn.Response(json.dumps({"error": str(e)}), status=HTTP_STATUS["SERVER_ERROR"])
