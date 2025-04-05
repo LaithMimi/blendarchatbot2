@@ -31,10 +31,9 @@ const ASK_API_URL = import.meta.env.MODE === 'production'
   ? "https://us-central1-arabicchatbot-24bb2.cloudfunctions.net/ask_user"
   : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/ask_user";
 
-  const CHATLOG_API_URL = import.meta.env.MODE === 'production'
+const CHATLOG_API_URL = import.meta.env.MODE === 'production'
   ? "https://us-central1-arabicchatbot-24bb2.cloudfunctions.net/api/chatlogs"
   : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/api_chatlogs";
-
 
 /**
  * Sends a question to the chatbot API and returns the response
@@ -50,6 +49,10 @@ export async function askQuestion(
   answer: string;
   sessionId: string;
   chatSession: ChatSession;
+  maxLimitReached?: boolean;
+  limitWarning?: boolean;
+  remainingMessages?: number;
+  subscriptionUrl?: string;
 }> {
   const authToken = document.cookie.split('; ').find(row => row.startsWith('authToken='))?.split('=')[1]
     || sessionStorage.getItem('authToken')
@@ -76,6 +79,28 @@ export async function askQuestion(
       sessionId
     })
   });
+
+  // Handle limit reached case (403 status)
+  if (res.status === 403) {
+    const errorResponse = await res.json();
+    
+    // If this is a limit reached error, handle it specially
+    if (errorResponse.maxLimitReached) {
+      return {
+        answer: "Message limit reached. Please upgrade to premium for unlimited messages.",
+        sessionId: sessionId || "limit_reached",
+        chatSession: { 
+          _id: sessionId || "limit_reached", 
+          userId: "", 
+          messages: [] 
+        },
+        maxLimitReached: true,
+        subscriptionUrl: errorResponse.subscriptionUrl || "/subscription"
+      };
+    }
+    
+    throw new Error(`askQuestion failed: ${res.status} - ${res.statusText}`);
+  }
 
   if (!res.ok) {
     throw new Error(`askQuestion failed: ${res.status} - ${res.statusText}`);

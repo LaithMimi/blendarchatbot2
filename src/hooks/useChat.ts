@@ -1,8 +1,10 @@
+// src/hooks/useChat.ts
 import { useState, useEffect } from 'react';
 import { askQuestion } from '@/api/askApi';
 import { useToast } from '@/hooks/use-toast';
 import { UserPreferences } from '@/components/PreferencesPopup';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export interface Message {
   id: string;
@@ -29,6 +31,8 @@ export const useChat = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [messageCount, setMessageCount] = useState(0);
+  const [limitReached, setLimitReached] = useState(false);
+  const [remainingMessages, setRemainingMessages] = useState<number | null>(null);
   const [userPreferences, setUserPreferences] = useState<UserPreferences>({
     name: '',
     level: 'beginner',
@@ -41,7 +45,8 @@ export const useChat = () => {
   const maxMessages = 50;
   
   const { toast } = useToast();
-  const { userName, currentUser } = useAuth();
+  const { userName, currentUser, isPremium } = useAuth();
+  const navigate = useNavigate();
   
   useEffect(() => {
     // Check if preferences are already saved
@@ -84,9 +89,15 @@ export const useChat = () => {
     // Load message count from local storage
     const localCount = localStorage.getItem('messageCount');
     if (localCount) {
-      setMessageCount(parseInt(localCount, 10));
+      const parsedCount = parseInt(localCount, 10);
+      setMessageCount(parsedCount);
+      
+      // Check if already at limit
+      if (!isPremium && parsedCount >= maxMessages) {
+        setLimitReached(true);
+      }
     }
-  }, [userName]);
+  }, [userName, isPremium]);
   
   const addWelcomeMessage = (preferences: UserPreferences) => {
     let welcomeMessage = '';
@@ -208,15 +219,18 @@ export const useChat = () => {
     console.log('Sending message:', content);
     
     // Check if we're at the message limit
-    if (messageCount >= maxMessages) {
+    if (limitReached) {
+      // Show a message limit toast without a button
       toast({
         title: "Message limit reached",
-        description: "You've reached the maximum messages for the free plan. Please upgrade to premium for unlimited messages.",
-        variant: "destructive"
+        description: "You've reached the maximum messages for the free plan. Please upgrade to premium for unlimited messages."
       });
       
-      // Add a message in the chat about the limit
-      addLimitReachedMessage();
+      // Navigate to the subscription page directly
+      setTimeout(() => {
+        navigate('/subscription');
+      }, 1500);
+      
       return;
     }
     
@@ -249,6 +263,25 @@ export const useChat = () => {
       
       console.log('Received API response:', response);
       
+      // Check if limit reached response
+      if (response.maxLimitReached) {
+        setLimitReached(true);
+        
+        // Show limit reached toast
+        toast({
+          title: "Message limit reached",
+          description: "You've reached the maximum messages for the free plan. Upgrade to Premium for unlimited messages.",
+          duration: 15000 // Longer duration to encourage action
+        });
+        
+        // Add a message in the chat about the limit
+        addLimitReachedMessage();
+        
+        // End typing animation
+        setIsTyping(false);
+        return;
+      }
+      
       if (!response || !response.answer) {
         throw new Error('Invalid response from server');
       }
@@ -261,6 +294,25 @@ export const useChat = () => {
       };
       
       setMessages(prev => [...prev, aiMessage]);
+      
+      // Update remaining messages if provided
+      if (response.remainingMessages !== undefined) {
+        setRemainingMessages(response.remainingMessages);
+      }
+      
+      // Check if warning about approaching limit
+      if (response.limitWarning) {
+        // Show warning toast - simpler version without buttons
+        toast({
+          title: "Message limit approaching",
+          description: `You have ${response.remainingMessages} message${response.remainingMessages === 1 ? '' : 's'} left. Consider upgrading to premium for unlimited messages.`
+        });
+        
+        // If this is the last message, update state
+        if (response.remainingMessages <= 0) {
+          setLimitReached(true);
+        }
+      }
       
       // Increment and save message count
       const newCount = messageCount + 1;
@@ -328,31 +380,6 @@ export const useChat = () => {
       
       localStorage.setItem('chatHistory', JSON.stringify(localChats));
       
-      // Check if user is approaching the limit
-      if (newCount === Math.floor(maxMessages * 0.8)) {
-        // Add a warning message about approaching the limit
-        const warningMessage: Message = {
-          id: Date.now().toString(),
-          content: `You're approaching your free message limit (${newCount}/${maxMessages}). Consider upgrading to Premium for unlimited messages.`,
-          isUser: false,
-          timestamp: new Date()
-        };
-        
-        setMessages(prev => [...prev, warningMessage]);
-        
-        // Add the warning message to local storage as well
-        if (existingSessionIndex >= 0) {
-          localChats[existingSessionIndex].messages.push({
-            id: warningMessage.id,
-            text: warningMessage.content,
-            sender: 'bot',
-            timestamp: warningMessage.timestamp
-          });
-          
-          localStorage.setItem('chatHistory', JSON.stringify(localChats));
-        }
-      }
-      
     } catch (error) {
       console.error('Error getting response from backend:', error);
       
@@ -369,15 +396,22 @@ export const useChat = () => {
         
         toast({
           title: "Authentication Error",
-          description: "Your session may have expired. Please log in again.",
-          variant: "destructive"
+          description: "Your session may have expired. Please log in again."
+        });
+      } else if (error.toString().includes('403') || error.toString().includes('FORBIDDEN')) {
+        // This could be a limit reached error
+        setLimitReached(true);
+        addLimitReachedMessage();
+        
+        toast({
+          title: "Message limit reached",
+          description: "You've reached the maximum messages for the free plan. Upgrade to Premium for unlimited messages."
         });
       } else {
         // General API error
         toast({
           title: "API Error",
-          description: "Could not get a response. Please check the console for details.",
-          variant: "destructive"
+          description: "Could not get a response. Please check the console for details."
         });
       }
     } finally {
@@ -406,6 +440,8 @@ export const useChat = () => {
       handleSendMessage(content);
     },
     messageCount,
-    maxMessages
+    maxMessages,
+    limitReached,
+    remainingMessages
   };
 };
