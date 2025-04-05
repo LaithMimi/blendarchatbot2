@@ -681,12 +681,10 @@ def ask_user(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(json.dumps({'error': "An error occurred"}), status=HTTP_STATUS["SERVER_ERROR"])
 
 
-@https_fn.on_request(
-    cors=options.CorsOptions(
-        cors_origins=CORS_ORIGINS,
-        cors_methods=["GET", "DELETE", "POST", "OPTIONS"]
-    )
-)
+@https_fn.on_request(cors=options.CorsOptions(
+    cors_origins=CORS_ORIGINS,
+    cors_methods=["get", "delete"]
+))
 def api_chatlogs(req: https_fn.Request) -> https_fn.Response:
     """
     A consolidated router function for chat logs:
@@ -708,6 +706,9 @@ def api_chatlogs(req: https_fn.Request) -> https_fn.Response:
         if method == "OPTIONS":
             return https_fn.Response("", status=204)
         
+        if req.method == "GET":
+            return handle_get_all_chatlogs(req)
+
         # Handle legacy endpoint
         if path == "getChatLogs" or path == "get_chat_logs":
             if method == "GET":

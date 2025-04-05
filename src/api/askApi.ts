@@ -1,7 +1,8 @@
 // src/api/askApi.ts
 import { db } from '../config/firebaseConfig';
-import { collection, doc, getDoc, setDoc, updateDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, query, where, getDocs } from 'firebase/firestore';
 import { deleteDoc } from 'firebase/firestore';
+
 export interface Message {
   id: string;
   content: string;
@@ -26,14 +27,17 @@ export interface ChatSession {
   [key: string]: any;
 }
 
-// const ASK_API_URL = process.env.NODE_ENV === 'production' ? "https://ask-user-jfys4ba3ka-uc.a.run.app" : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/ask_user";
 const ASK_API_URL = import.meta.env.MODE === 'production'
   ? "https://us-central1-arabicchatbot-24bb2.cloudfunctions.net/ask_user"
   : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/ask_user";
 
+  const CHATLOG_API_URL = import.meta.env.MODE === 'production'
+  ? "https://us-central1-arabicchatbot-24bb2.cloudfunctions.net/api/chatlogs"
+  : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/api_chatlogs";
+
+
 /**
  * Sends a question to the chatbot API and returns the response
- * Also syncs the conversation with Firestore
  */
 export async function askQuestion(
   question: string, 
@@ -47,7 +51,6 @@ export async function askQuestion(
   sessionId: string;
   chatSession: ChatSession;
 }> {
-  // Get auth token from cookie or localStorage
   const authToken = document.cookie.split('; ').find(row => row.startsWith('authToken='))?.split('=')[1]
     || sessionStorage.getItem('authToken')
     || localStorage.getItem('authToken');
@@ -61,7 +64,6 @@ export async function askQuestion(
     "Authorization": `Bearer ${authToken}`
   };
 
-  // Send the request to the server
   const res = await fetch(ASK_API_URL, {
     method: "POST",
     headers,
@@ -80,8 +82,7 @@ export async function askQuestion(
   }
 
   const response = await res.json();
-  
-  // If we have a Firestore reference, sync the chat session
+
   if (db && response.chatSession) {
     try {
       const sessionRef = doc(db, "chatLogs", response.sessionId);
@@ -107,51 +108,43 @@ export async function fetchChatLogs(
   chats: ChatSession[];
   totalPages: number;
 }> {
-  // First try to fetch from Firestore if available
   if (db) {
     try {
       const chatsCollection = collection(db, "chatLogs");
       let chatQuery = query(chatsCollection);
-      
-      // Apply filters if provided
+
       if (userId) {
         chatQuery = query(chatsCollection, where("userId", "==", userId));
       }
-      
-      // Additional filters could be applied here
-      
+
       const querySnapshot = await getDocs(chatQuery);
       const chats: ChatSession[] = [];
-      
+
       querySnapshot.forEach((doc) => {
         const chatData = doc.data() as ChatSession;
-        
-        // Apply client-side search filtering if needed
+
         if (searchTerm && !chatContainsSearchTerm(chatData, searchTerm)) {
           return;
         }
-        
-        // Apply date filtering if needed
+
         if (dateRange?.from && dateRange?.to && !isWithinDateRange(chatData, dateRange)) {
           return;
         }
-        
+
         chats.push(chatData);
       });
-      
-      // Sort by updatedAt or createdAt
+
       chats.sort((a, b) => {
         const dateA = new Date(a.updatedAt || a.createdAt || 0);
         const dateB = new Date(b.updatedAt || b.createdAt || 0);
         return dateB.getTime() - dateA.getTime();
       });
-      
-      // Handle pagination
+
       const startIndex = (currentPage - 1) * pageSize;
       const endIndex = startIndex + pageSize;
       const paginatedChats = chats.slice(startIndex, endIndex);
       const totalPages = Math.ceil(chats.length / pageSize);
-      
+
       return {
         chats: paginatedChats,
         totalPages
@@ -160,42 +153,33 @@ export async function fetchChatLogs(
       console.error("Failed to fetch from Firestore, falling back to API:", firestoreError);
     }
   }
-  
-  // Fall back to API if Firestore fetch fails or isn't available
-  const query = new URLSearchParams();
-  query.set("page", String(currentPage));
-  query.set("pageSize", String(pageSize));
-  
-  if (searchTerm) query.set("searchTerm", searchTerm);
-  if (userId) query.set("userId", userId);
-  
-  if (dateRange?.from) query.set("dateFrom", dateRange.from.toISOString());
-  if (dateRange?.to) query.set("dateTo", dateRange.to.toISOString());
 
-  const url = `/api/chatlogs?${query.toString()}`;
+  const searchParams = new URLSearchParams();
+  searchParams.set("page", String(currentPage));
+  searchParams.set("pageSize", String(pageSize));
+  if (searchTerm) searchParams.set("searchTerm", searchTerm);
+  if (userId) searchParams.set("userId", userId);
+  if (dateRange?.from) searchParams.set("dateFrom", dateRange.from.toISOString());
+  if (dateRange?.to) searchParams.set("dateTo", dateRange.to.toISOString());
+
+  const url = `${CHATLOG_API_URL}?${searchParams.toString()}`;
   const res = await fetch(url, { method: "GET" });
-  
+
   if (!res.ok) {
     throw new Error(`fetchChatLogs failed: ${res.status} - ${res.statusText}`);
   }
-  
+
   return res.json();
 }
 
-/**
- * Deletes a chat session
- */
 export async function deleteChat(sessionId: string): Promise<{success: boolean}> {
-  // Delete from server first
-  const res = await fetch(`/api/chatlogs/${sessionId}`, {
-    method: "DELETE",
-  });
-  
+  const url = `${CHATLOG_API_URL}/${sessionId}`;
+  const res = await fetch(url, { method: "DELETE" });
+
   if (!res.ok) {
     throw new Error(`deleteChat failed: ${res.status} - ${res.statusText}`);
   }
-  
-  // If server delete succeeds and Firestore is available, delete from Firestore too
+
   if (db) {
     try {
       await deleteDoc(doc(db, "chatLogs", sessionId));
@@ -203,31 +187,23 @@ export async function deleteChat(sessionId: string): Promise<{success: boolean}>
       console.error("Failed to delete chat from Firestore:", error);
     }
   }
-  
+
   return res.json();
 }
 
-/**
- * Deletes all chat sessions
- */
 export async function deleteAllChats(): Promise<{success: boolean}> {
-  // Delete from server first
-  const res = await fetch("/api/chatlogs", {
-    method: "DELETE",
-  });
+  const res = await fetch(CHATLOG_API_URL, { method: "DELETE" });
+
   if (!res.ok) {
     throw new Error(`deleteAllChats failed: ${res.status} - ${res.statusText}`);
   }
+
   return res.json();
 }
 
-/**
- * Gets a specific chat session by ID
- */
 export async function getChatSession(sessionId: string): Promise<ChatSession | null> {
   if (!sessionId) return null;
-  
-  // Try to get from Firestore first if available
+
   if (db) {
     try {
       const sessionDoc = await getDoc(doc(db, "chatLogs", sessionId));
@@ -238,10 +214,9 @@ export async function getChatSession(sessionId: string): Promise<ChatSession | n
       console.error("Failed to get chat session from Firestore:", error);
     }
   }
-  
-  // Fall back to API
+
   try {
-    const res = await fetch(`/api/chatlogs/${sessionId}`);
+    const res = await fetch(`${CHATLOG_API_URL}/${sessionId}`);
     if (!res.ok) {
       if (res.status === 404) return null;
       throw new Error(`getChatSession failed: ${res.status} - ${res.statusText}`);
@@ -253,9 +228,6 @@ export async function getChatSession(sessionId: string): Promise<ChatSession | n
   }
 }
 
-/**
- * Converts server-side message format to client-side message format if needed
- */
 export function normalizeMessage(message: any): Message {
   return {
     id: message.id,
@@ -267,30 +239,19 @@ export function normalizeMessage(message: any): Message {
   };
 }
 
-/**
- * Helper function to check if a chat contains a search term
- */
 function chatContainsSearchTerm(chat: ChatSession, searchTerm: string): boolean {
   const term = searchTerm.toLowerCase();
-  
-  // Check in user name/email
-  if (chat.userName?.toLowerCase().includes(term) || 
-      chat.userEmail?.toLowerCase().includes(term) ||
-      chat.userId?.toLowerCase().includes(term)) {
-    return true;
-  }
-  
-  // Check in messages
-  return chat.messages.some(msg => 
-    (msg.content || msg.text || '').toLowerCase().includes(term)
+  return (
+    chat.userName?.toLowerCase().includes(term) ||
+    chat.userEmail?.toLowerCase().includes(term) ||
+    chat.userId?.toLowerCase().includes(term) ||
+    chat.messages.some(msg =>
+      (msg.content || msg.text || '').toLowerCase().includes(term)
+    )
   );
 }
 
-/**
- * Helper function to check if a chat is within a date range
- */
 function isWithinDateRange(chat: ChatSession, dateRange: { from: Date, to: Date }): boolean {
   const chatDate = new Date(chat.createdAt || 0);
   return chatDate >= dateRange.from && chatDate <= dateRange.to;
 }
-
