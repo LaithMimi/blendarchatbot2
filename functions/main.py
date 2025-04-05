@@ -9,6 +9,8 @@ from firebase_functions.params import SecretParam
 import uuid
 from openai import OpenAI
 from dotenv import load_dotenv
+from google.cloud.firestore_v1.base_query import FieldFilter
+
 
 OPENAI_API_KEY = SecretParam("OPENAI_API_KEY")
 # CORS_ORIGINS = ["https://chat\.blendarabic\.com", "http://localhost:8050"]
@@ -160,19 +162,33 @@ def verify_auth(req: https_fn.Request) -> tuple[bool, str, str]:
         return False, '', ''
 
 
+
 def get_materials(level, week):
     try:
         # Remove the 'week' prefix if it exists
         clean_week = week.replace('week', '').zfill(2)
+        logger.info(f"Clean week: {clean_week}")
         lesson_key = f"{level}_week_{clean_week}"
+        logger.info(f"Lesson key: {lesson_key}")
         logger.info(f"Searching for materials with lesson key: {lesson_key}")
 
         # Query for documents where the ID starts with the lesson key
         db = get_firestore_client()
-        docs = db.collection("materials").where("id", ">=", lesson_key).where("id", "<", lesson_key + "_z").stream()
+        docs = db.collection("materials").stream()
+        for doc in docs:
+            data = doc.to_dict()
+            logger.info(f"RAW ID FIELD: {data.get('id')} | DOC ID: {doc.id}")
+
+        docs = db.collection("materials") \
+            .where(filter=FieldFilter("id", ">=", lesson_key)) \
+            .where(filter=FieldFilter("id", "<", lesson_key + "_z")) \
+            .stream()
+
 
         # Convert to list of dictionaries
         materials = [doc.to_dict() for doc in docs]
+        for mat in materials:
+            logger.info(f"✅ Material found: {mat.get('id')}")
 
         logger.info(f"Retrieved {len(materials)} relevant teaching materials.")
 
