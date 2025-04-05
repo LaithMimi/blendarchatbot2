@@ -329,27 +329,6 @@ def add_messages_to_session(session, messages):
     return session
 
 
-def can_user_ask(user_id: str) -> bool:
-    current_month = get_current_month()
-    db = get_firestore_client()
-    user_doc = db.collection('users').document(user_id).get()
-    if not user_doc.exists:
-        db.collection('users').document(user_id).set({
-            'totalMessages': {
-                current_month: 0
-            }
-        })
-        return True
-
-    user_data = user_doc.to_dict()
-    isPremium = user_data.get('premium', {}).get(current_month, False)
-    if isPremium:
-        return True
-
-    totalMessages = user_data.get('totalMessages', {}).get(current_month, 0)
-    return totalMessages < MAX_MONTHLY_MESSAGES
-
-
 def increase_user_message_count(user_id: str):
     current_month = get_current_month()
     db = get_firestore_client()
@@ -641,10 +620,49 @@ def ask_user(req: https_fn.Request) -> https_fn.Response:
             return https_fn.Response(json.dumps({'error': 'Authentication failed'}), status=HTTP_STATUS["UNAUTHORIZED"])
         
         # Check if user can ask questions
-        if not can_user_ask(user_id):
-            logger.error("User has reached the maximum number of messages")
-            return https_fn.Response(json.dumps({'error': 'User has reached the maximum number of messages'}), status=HTTP_STATUS["FORBIDDEN"])
+        current_month = get_current_month()
+        db = get_firestore_client()
+        user_doc = db.collection('users').document(user_id).get()
         
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            isPremium = user_data.get('premium', {}).get(current_month, False)
+            
+            # If not premium, check message count
+            if not isPremium:
+                totalMessages = user_data.get('totalMessages', {}).get(current_month, 0)
+                
+                # If at exact limit, send a warning with the response
+                if totalMessages == MAX_MONTHLY_MESSAGES - 1:
+                    # This is their last message, warn them
+                    limitWarning = True
+                    remainingMessages = 1
+                # If over limit, return limit reached response
+                elif totalMessages >= MAX_MONTHLY_MESSAGES:
+                    logger.info(f"User {user_id} has reached message limit: {totalMessages}/{MAX_MONTHLY_MESSAGES}")
+                    return https_fn.Response(json.dumps({
+                        'error': 'Message limit reached',
+                        'maxLimitReached': True,
+                        'subscriptionUrl': '/subscription',
+                        'currentCount': totalMessages,
+                        'maxLimit': MAX_MONTHLY_MESSAGES
+                    }), status=HTTP_STATUS["FORBIDDEN"])
+                # If approaching limit (80% or more), add warning flag
+                elif totalMessages >= int(MAX_MONTHLY_MESSAGES * 0.8):
+                    limitWarning = True
+                    remainingMessages = MAX_MONTHLY_MESSAGES - totalMessages
+                else:
+                    limitWarning = False
+                    remainingMessages = MAX_MONTHLY_MESSAGES - totalMessages
+            else:
+                # Premium users don't have limits
+                limitWarning = False
+                remainingMessages = -1  # -1 indicates unlimited
+        else:
+            # New user, no warning needed
+            limitWarning = False
+            remainingMessages = MAX_MONTHLY_MESSAGES
+
         # Validate OpenAI API key
         if not OPENAI_API_KEY.value:
             logger.error("OpenAI API key not available")
@@ -690,7 +708,9 @@ def ask_user(req: https_fn.Request) -> https_fn.Response:
             "direction": get_text_direction(language),
             "_id": session['_id'],
             "sessionId": session['_id'],
-            "chatSession": session
+            "chatSession": session,
+            "limitWarning": limitWarning,
+            "remainingMessages": remainingMessages
         }), status=HTTP_STATUS["OK"])
     except Exception as e:
         logger.error(f"Error processing ask user request: {str(e)}", exc_info=True)
