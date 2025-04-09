@@ -8,15 +8,17 @@ from firebase_functions import logger, options
 from firebase_functions.params import SecretParam
 import uuid
 from openai import OpenAI
-from dotenv import load_dotenv
 from google.cloud.firestore_v1.base_query import FieldFilter
+import os
+import traceback
 
+# Get the PORT environment variable, default to 8080
+PORT = int(os.environ.get('PORT', 8080))
 
 OPENAI_API_KEY = SecretParam("OPENAI_API_KEY")
 # CORS_ORIGINS = ["https://chat\.blendarabic\.com", "http://localhost:8050"]
 CORS_ORIGINS = ["https://chat.blendarabic.com", "http://localhost:8050"]
 MAX_MONTHLY_MESSAGES = 50
-load_dotenv()
 
 DEFAULT_WEEK = "01"
 DEFAULT_LEVEL = "beginner"
@@ -752,3 +754,36 @@ def api_chatlogs(req: https_fn.Request) -> https_fn.Response:
     except Exception as e:
         logger.error(f"API chatlogs error: {str(e)}", exc_info=True)
         return https_fn.Response(json.dumps({"error": str(e)}), status=HTTP_STATUS["SERVER_ERROR"])
+
+def handle_error(e: Exception, status_code: int = HTTP_STATUS["SERVER_ERROR"]) -> https_fn.Response:
+    """Helper function to handle errors and return proper JSON responses"""
+    error_message = str(e)
+    logger.error(f"Error: {error_message}\n{traceback.format_exc()}")
+    return https_fn.Response(
+        json.dumps({
+            "error": error_message,
+            "status": "error",
+            "code": status_code
+        }),
+        status=status_code,
+        headers={"Content-Type": "application/json"}
+    )
+
+# Add this at the end of the file
+if __name__ == "__main__":
+    from flask import Flask, jsonify
+    app = Flask(__name__)
+    
+    @app.route("/__/health")
+    def health_check():
+        return jsonify({"status": "ok"}), 200
+        
+    @app.route("/__/quitquitquit")
+    def quitquitquit():
+        return jsonify({"status": "ok"}), 200
+        
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        return handle_error(e)
+        
+    app.run(host="0.0.0.0", port=PORT)

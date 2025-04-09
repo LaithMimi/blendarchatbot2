@@ -28,11 +28,11 @@ export interface ChatSession {
 }
 
 const ASK_API_URL = import.meta.env.MODE === 'production'
-  ? "https://us-central1-arabicchatbot-24bb2.cloudfunctions.net/ask_user"
+  ? "https://ask-user-jfys4ba3ka-uc.a.run.app"
   : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/ask_user";
 
 const CHATLOG_API_URL = import.meta.env.MODE === 'production'
-  ? "https://us-central1-arabicchatbot-24bb2.cloudfunctions.net/api/chatlogs"
+  ? "https://api-chatlogs-jfys4ba3ka-uc.a.run.app"
   : "http://127.0.0.1:5001/arabicchatbot-24bb2/us-central1/api_chatlogs";
 
 /**
