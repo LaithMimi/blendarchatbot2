@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@tanstack/react-query": "^5.72.2",
+    "date-fns": "^4.1.0",
+    "framer-motion": "^12.6.3"
+  }
+}
