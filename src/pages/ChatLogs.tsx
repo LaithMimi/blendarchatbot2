@@ -231,7 +231,7 @@ const ChatLogs: React.FC = () => {
         <div className="max-w-7xl mx-auto">
           <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <h1 className="text-4xl md:text-5xl lg:text-[49px] font-bold font-sans text-brand-darkGray dark:text-white">
-              Chat Logs
+              Admin Dashboard
             </h1>
             <div className="flex gap-2 flex-wrap justify-end">
               <Button 
