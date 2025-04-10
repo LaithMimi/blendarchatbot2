@@ -16,8 +16,7 @@ import traceback
 PORT = int(os.environ.get('PORT', 8080))
 
 OPENAI_API_KEY = SecretParam("OPENAI_API_KEY")
-# CORS_ORIGINS = ["https://chat\.blendarabic\.com", "http://localhost:8050"]
-CORS_ORIGINS = ["https://chat.blendarabic.com", "http://localhost:8050"]
+CORS_ORIGINS = ["https://chat\.blendarabic\.com", "http://localhost:8050"]
 MAX_MONTHLY_MESSAGES = 50
 
 DEFAULT_WEEK = "01"
