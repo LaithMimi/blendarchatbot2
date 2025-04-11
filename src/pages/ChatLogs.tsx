@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'; 
-import { Download, Search, Calendar, User, MessageSquare, Trash2, AlertTriangle, Upload, Database, FileDown } from 'lucide-react';
+import { Download, Search, Calendar, User, MessageSquare, Trash2, AlertTriangle, Upload, Database, FileDown, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { 
   Popover,
@@ -26,9 +26,24 @@ import UploadJsonToFirestore from '../components/UploadJsonToFirestore';
 import { DateRange } from 'react-day-picker';
 import { fetchChatLogs, ChatSession, Message, deleteChat, deleteAllChats } from '@/api/askApi';
 import { useToast } from '@/hooks/use-toast';
+import { useQuery } from '@tanstack/react-query';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '@/config/firebaseConfig';
+
+interface Material {
+  id: string;
+  hebrew_input?: string;
+  hebrewInput?: string;
+  arabic_response?: string;
+  arabicResponse?: string;
+  pronunciation?: string;
+  level?: string;
+  week?: string;
+}
 
 const ChatLogs: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [materialsSearchTerm, setMaterialsSearchTerm] = useState('');
   const [date, setDate] = useState<DateRange | undefined>();
   const [userId, setUserId] = useState('');
   const [messageType, setMessageType] = useState<'all' | 'user' | 'bot'>('all');
@@ -45,6 +60,50 @@ const ChatLogs: React.FC = () => {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   
   const { toast } = useToast();
+  
+  // Fetch materials from Firestore using React Query
+  const { 
+    data: materials, 
+    isLoading: isMaterialsLoading, 
+    isError: isMaterialsError, 
+    error: materialsError, 
+    refetch: refetchMaterials 
+  } = useQuery({
+    queryKey: ['materials'],
+    queryFn: async () => {
+      try {
+        console.log('Fetching materials from Firestore...');
+        const materialsRef = collection(db, 'materials');
+        const snapshot = await getDocs(materialsRef);
+        const docs = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        console.log(`Successfully fetched ${docs.length} materials`);
+        return docs as Material[];
+      } catch (err) {
+        console.error('Error fetching materials:', err);
+        throw err;
+      }
+    },
+    refetchOnWindowFocus: false,
+    staleTime: 300000 // 5 minutes
+  });
+  
+  // Filter materials based on search term
+  const filteredMaterials = materials?.filter(material => {
+    if (!materialsSearchTerm) return true;
+    
+    const term = materialsSearchTerm.toLowerCase();
+    return (
+      (material.id?.toLowerCase().includes(term)) ||
+      ((material.hebrewInput || material.hebrew_input || '')?.toLowerCase().includes(term)) ||
+      ((material.arabicResponse || material.arabic_response || '')?.toLowerCase().includes(term)) ||
+      (material.pronunciation?.toLowerCase().includes(term)) ||
+      (material.level?.toLowerCase().includes(term)) ||
+      (material.week?.toLowerCase().includes(term))
+    );
+  });
   
   const loadChatLogs = async () => {
     setIsLoading(true);
@@ -225,6 +284,40 @@ const ChatLogs: React.FC = () => {
     setIsUploadDialogOpen(false);
   };
 
+  const exportMaterialsToCSV = () => {
+    if (!materials || materials.length === 0) {
+      toast({
+        title: "No materials to export",
+        description: "There are no materials available to export.",
+        variant: "default"
+      });
+      return;
+    }
+    
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "ID,Level,Week,Hebrew Input,Arabic Response,Pronunciation\n";
+    
+    materials.forEach(material => {
+      const row = [
+        material.id || '',
+        material.level || '',
+        material.week || '',
+        `"${((material.hebrewInput || material.hebrew_input || '').replace(/"/g, '""'))}"`,
+        `"${((material.arabicResponse || material.arabic_response || '').replace(/"/g, '""'))}"`,
+        `"${(material.pronunciation || '').replace(/"/g, '""')}"`
+      ];
+      csvContent += row.join(',') + '\n';
+    });
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `teaching_materials_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-brand-background dark:bg-brand-darkGray/90">
       <main className="flex-1 page-container">
@@ -270,6 +363,7 @@ const ChatLogs: React.FC = () => {
             <TabsList className="mb-4">
               <TabsTrigger value="chat-logs">Chat Logs</TabsTrigger>
               <TabsTrigger value="upload-materials">Upload Teaching Materials</TabsTrigger>
+              <TabsTrigger value="view-materials">View Materials</TabsTrigger>
             </TabsList>
             
             <TabsContent value="chat-logs">
@@ -525,25 +619,174 @@ const ChatLogs: React.FC = () => {
                   
                   <div className="mb-6 p-4 bg-gray-100 dark:bg-gray-800 rounded-md overflow-x-auto">
                     <pre className="text-sm text-brand-darkGray dark:text-gray-300">
-{`[
-  {
-    "id": "beginner_week_01_001",
-    "hebrew_input": "ברוכים הבאים",
-    "arabic_response": "أهْلًا وسَهْلًا",
-    "pronunciation": "אַהְלַן וַסַהְלַן"
-  },
-  {
-    "id": "beginner_week_01_002",
-    "hebrew_input": "שלום",
-    "arabic_response": "مَرْحَبَا",
-    "pronunciation": "מַרְחַבַּא"
-  }
-]`}
+                      {`[
+                        {
+                          "id": "beginner_week_01_001",
+                          "hebrew_input": "ברוכים הבאים",
+                          "arabic_response": "أهْلًا وسَهْلًا",
+                          "pronunciation": "אַהְלַן וַסַהְלַן"
+                        },
+                        {
+                          "id": "beginner_week_01_002",
+                          "hebrew_input": "שלום",
+                          "arabic_response": "مَرْحَبَا",
+                          "pronunciation": "מַרְחַבַּא"
+                        }
+                      ]`}
                     </pre>
                   </div>
                   
                   <UploadJsonToFirestore onUploadSuccess={handleUploadSuccess} />
                 </div>
+              </div>
+            </TabsContent>
+            
+            <TabsContent value="view-materials">
+              <div className="bg-white/70 dark:bg-black/20 backdrop-blur-sm rounded-xl p-6 shadow-sm border border-border">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                  <h2 className="text-2xl font-bold text-brand-darkGray dark:text-white">
+                    Teaching Materials
+                  </h2>
+                  
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <div className="relative flex-1 sm:w-64">
+                      <Input
+                        type="text"
+                        placeholder="Search materials..."
+                        value={materialsSearchTerm}
+                        onChange={(e) => setMaterialsSearchTerm(e.target.value)}
+                        className="pl-10"
+                      />
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                    </div>
+                    
+                    <Button
+                      onClick={() => refetchMaterials()}
+                      variant="outline"
+                      className="whitespace-nowrap"
+                      title="Refresh materials list"
+                    >
+                      <RefreshCw size={16} className="mr-2" />
+                      <span className="hidden sm:inline">Refresh</span>
+                    </Button>
+                    
+                    <Button
+                      onClick={exportMaterialsToCSV}
+                      variant="outline"
+                      className="whitespace-nowrap"
+                      title="Export materials to CSV"
+                    >
+                      <Download size={16} className="mr-2" />
+                      <span className="hidden sm:inline">Export</span>
+                    </Button>
+                  </div>
+                </div>
+                
+                {/* Loading state */}
+                {isMaterialsLoading && (
+                  <div className="flex justify-center items-center p-12">
+                    <div className="flex flex-col items-center">
+                      <Loader2 className="h-8 w-8 text-brand-bordeaux animate-spin mb-4" />
+                      <p className="text-muted-foreground">Loading materials...</p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Error state */}
+                {isMaterialsError && (
+                  <div className="flex flex-col items-center justify-center p-12">
+                    <div className="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-4 rounded-lg flex items-start gap-3 max-w-lg w-full mb-4">
+                      <AlertCircle className="h-5 w-5 text-red-500 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-medium">Failed to load materials</p>
+                        <p className="text-sm mt-1 text-red-600 dark:text-red-300">
+                          {materialsError instanceof Error ? materialsError.message : 'An unknown error occurred'}
+                        </p>
+                      </div>
+                    </div>
+                    <Button 
+                      onClick={() => refetchMaterials()}
+                      className="px-4 py-2 bg-brand-bordeaux text-white rounded-md hover:bg-brand-bordeaux/90"
+                    >
+                      Try Again
+                    </Button>
+                  </div>
+                )}
+                
+                {/* Empty state */}
+                {!isMaterialsLoading && !isMaterialsError && (!materials || materials.length === 0) && (
+                  <div className="flex flex-col items-center justify-center p-12 text-center">
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 p-4 rounded-lg max-w-lg w-full mb-4">
+                      <p className="font-medium">No teaching materials found</p>
+                      <p className="text-sm mt-1">
+                        Use the upload feature to add teaching materials.
+                      </p>
+                    </div>
+                    <Button
+                      onClick={() => setIsUploadDialogOpen(true)}
+                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                    >
+                      Upload Materials
+                    </Button>
+                  </div>
+                )}
+                
+                {/* No results for search */}
+                {!isMaterialsLoading && !isMaterialsError && materials && materials.length > 0 && filteredMaterials && filteredMaterials.length === 0 && (
+                  <div className="flex flex-col items-center justify-center p-8 text-center">
+                    <div className="bg-gray-50 dark:bg-gray-800/30 text-gray-700 dark:text-gray-300 p-4 rounded-lg max-w-lg w-full">
+                      <p className="font-medium">No matching materials</p>
+                      <p className="text-sm mt-1">
+                        Your search for "{materialsSearchTerm}" did not match any materials.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Materials table */}
+                {!isMaterialsLoading && !isMaterialsError && filteredMaterials && filteredMaterials.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 dark:bg-gray-800/30 text-left">
+                        <tr>
+                          <th className="px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">ID</th>
+                          <th className="px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Level/Week</th>
+                          <th className="px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Hebrew Input</th>
+                          <th className="px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Arabic Response</th>
+                          <th className="px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Pronunciation</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white dark:bg-transparent divide-y divide-gray-200 dark:divide-gray-700">
+                        {filteredMaterials.map((material) => (
+                          <tr key={material.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/20 transition-colors">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                              {material.id}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                              {material.level || 'N/A'} / {material.week || 'N/A'}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-white text-right" dir="rtl">
+                              {material.hebrewInput || material.hebrew_input || 'N/A'}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-white text-right font-arabic" dir="rtl">
+                              {material.arabicResponse || material.arabic_response || 'N/A'}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-white text-right" dir="rtl">
+                              {material.pronunciation || 'N/A'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                
+                {/* Footer with stats */}
+                {!isMaterialsLoading && !isMaterialsError && materials && materials.length > 0 && filteredMaterials && filteredMaterials.length > 0 && (
+                  <div className="mt-4 px-6 py-3 bg-gray-50 dark:bg-gray-800/20 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 rounded-b-lg">
+                    Showing {filteredMaterials.length} of {materials.length} materials
+                  </div>
+                )}
               </div>
             </TabsContent>
           </Tabs>
@@ -654,14 +897,14 @@ const ChatLogs: React.FC = () => {
             <div className="mb-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-md overflow-x-auto">
               <p className="mb-2 font-medium text-sm">Required JSON Structure:</p>
               <pre className="text-xs text-brand-darkGray dark:text-gray-300">
-{`[
-  {
-    "id": "beginner_week_01_001",
-    "hebrew_input": "ברוכים הבאים",
-    "arabic_response": "أهْلًا وسَهْلًا",
-    "pronunciation": "אַהְלַן וַסַהְלַן"
-  }
-]`}
+              {`[
+                {
+                  "id": "beginner_week_01_001",
+                  "hebrew_input": "ברוכים הבאים",
+                  "arabic_response": "أهْلًا وسَهْلًا",
+                  "pronunciation": "אַהְלַן וַסַהְלַן"
+                }
+              ]`}
               </pre>
             </div>
             
