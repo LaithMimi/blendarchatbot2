@@ -33,13 +33,21 @@ service cloud.firestore {
       );
     }
     
-    // Allow users to access their own chat logs
+    // Allow users to access chat logs
     match /chatLogs/{sessionId} {
-      allow read, write: if request.auth != null && (
-        // If session belongs to this user
-        resource.data.userId == request.auth.uid ||
-        // Or if session user ID matches encoded email
-        resource.data.userEmail == request.auth.token.email
+      // Allow reading all chat logs for authenticated users
+      allow read: if request.auth != null;
+      
+      // Allow writing only to one's own chat logs
+      allow write: if request.auth != null && (
+        // If creating a new session, ensure it's for the current user
+        request.resource.data.userId == request.auth.uid ||
+        request.resource.data.userEmail == request.auth.token.email ||
+        // If updating an existing session, ensure it belongs to the user
+        (resource != null && (
+          resource.data.userId == request.auth.uid ||
+          resource.data.userEmail == request.auth.token.email
+        ))
       );
     }
     
@@ -56,9 +64,9 @@ service cloud.firestore {
                       request.resource.data.userEmail == request.auth.token.email;
     }
     
-    // Materials collection is readable by all authenticated users
+    // Materials collection is readable and writable by all authenticated users
     match /materials/{docId} {
-      allow read: if request.auth != null;
+      allow read, write: if request.auth != null;
     }
   }
 }

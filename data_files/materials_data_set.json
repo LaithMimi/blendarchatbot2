@@ -28,5 +28,15 @@
   {"id": "beginner_week_01_027", "hebrew_input": "כמה", "arabic_response": "قَدِّيش", "pronunciation": "קַדֵּיש"},
   {"id": "beginner_week_01_028", "hebrew_input": "אני לא מבין", "arabic_response": "أنَا مِش فَاهِم", "pronunciation": "אַנַא מִש פַאהֵם"},
   {"id": "beginner_week_01_029", "hebrew_input": "אני רוצה ללמוד ערבית", "arabic_response": "أنَا بِدِّي أَتْعَلَّم عَرَبِي", "pronunciation": "אַנַא בִּדִّי אַתְעַלַّם עַרַבִּי"},
-  {"id": "beginner_week_01_030", "hebrew_input": "איך קוראים לך? (זכר)", "arabic_response": "شُو اِسْمَك؟", "pronunciation": "שוּ אִסְמַכּ?"}
+  {"id": "beginner_week_01_030", "hebrew_input": "איך קוראים לך? (זכר)", "arabic_response": "شُو اِسْمَك؟", "pronunciation": "שוּ אִסְמַכּ?"},
+  {"id": "intermediate_week_01_001", "hebrew_input": "איך קוראים לך?", "arabic_response": "شُو إسْمَك؟", "pronunciation": "שוּ אִסְמַכּ؟"},
+  {"id": "intermediate_week_01_002", "hebrew_input": "מאיפה אתה?", "arabic_response": "مِن وِين إِنْتَ؟", "pronunciation": "מִן וֵין אינְתַ؟"},
+  {"id": "intermediate_week_01_003", "hebrew_input": "בן כמה אתה?", "arabic_response": "قَدِّيش عُمْرَك؟", "pronunciation": "קַדֵּיש עֻמְרַכּ؟"},
+  {"id": "intermediate_week_01_004", "hebrew_input": "יש לי חברים ערבים", "arabic_response": "عِنْدِي أَصْدِقَاء عَرَب", "pronunciation": "עִנְדִי אַסְדִקַאעַ עַרַב"},
+  {"id": "intermediate_week_01_005", "hebrew_input": "אני לומד באוניברסיטה", "arabic_response": "أنَا بِدْرُس فِي الجَامْعَة", "pronunciation": "אַנַא בִּדְרוּס פִי אלְגַ'אמְעַה"},
+  {"id": "intermediate_week_01_006", "hebrew_input": "איזה שפות אתה מדבר?", "arabic_response": "أَيّ لُغَات بِتِحْكِي؟", "pronunciation": "אַיּ לֻעַ'את בִּתִחְכִּי؟"},
+  {"id": "intermediate_week_01_007", "hebrew_input": "אני מבין קצת", "arabic_response": "أنَا فَاهِم شْوَيّ", "pronunciation": "אַנַא פַאהֵם שְוַיّ"},
+  {"id": "intermediate_week_01_008", "hebrew_input": "אני עייף", "arabic_response": "أنَا تَعْبَان", "pronunciation": "אַנַא תַעְבַּאן"},
+  {"id": "intermediate_week_01_009", "hebrew_input": "אני רעב", "arabic_response": "أنَا جُوعَان", "pronunciation": "אַנַא ג'וּעַאן"},
+  {"id": "intermediate_week_01_010", "hebrew_input": "אני צריך עזרה", "arabic_response": "أنَا بِحَاجَة لِمُسَاعَدَة", "pronunciation": "אַנַא בִּחַאגֵ'ה לִמוּסַעַדַה"}
 ]
