@@ -9,7 +9,7 @@ import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card"
 import { Mail, User, Loader2, CheckCircle, Send, BugPlay, ArrowRight } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import Cookies from 'js-cookie';
-// import { FcGoogle } from "react-icons/fc"; // Google Icon
+import { FcGoogle } from "react-icons/fc"; // Google Icon
 
 const Auth: React.FC = () => {
   const [step, setStep] = useState<'email' | 'name' | 'sent'>('email');
@@ -266,7 +266,7 @@ const Auth: React.FC = () => {
     switch (step) {
       case 'email':
         return {
-          icon: <Mail className="h-8 w-8 text-brand-bordeaux" />,
+          icon: <FcGoogle className="h-8 w-8" />,
           title: "התחברות למערכת",
           description: "התחבר באמצעות Google"
         };
@@ -453,14 +453,14 @@ const Auth: React.FC = () => {
                 </div>
               </div> */}
               
-              <Button
+                <Button
                 onClick={handleGoogleLogin}
                 className="w-full bg-white text-black border border-gray-300 shadow-md flex items-center justify-center gap-2"
                 disabled={loading}
-              >
-                {/* <FcGoogle className="h-5 w-5" /> */}
+                >
+                <FcGoogle className="h-5 w-5" />
                 <span>התחבר עם Google</span>
-              </Button>
+                </Button>
             </div>
 
             {/* Developer mode button (hidden until the logo is clicked 5 times) */}
