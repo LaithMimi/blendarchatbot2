@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import Footer from '@/components/Footer';
 import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card";
-import { Mail, User, Loader2, CheckCircle, Send, BugPlay, ArrowRight } from 'lucide-react';
+import { Mail, User, Loader2, CheckCircle, Send, ArrowRight } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import Cookies from 'js-cookie';
 import { FcGoogle } from "react-icons/fc"; // Google Icon
@@ -14,8 +14,6 @@ import { FcGoogle } from "react-icons/fc"; // Google Icon
 const Auth: React.FC = () => {
   const [step, setStep] = useState<'email' | 'name' | 'sent'>('email');
   const [loading, setLoading] = useState(false);
-  const [showDevMode, setShowDevMode] = useState(false);
-  // Use local state for name input to ensure it works properly
   const [localUserName, setLocalUserName] = useState('');
   
   const { 
@@ -25,10 +23,8 @@ const Auth: React.FC = () => {
     currentUser, 
     isAuthenticated, 
     googleSignIn, 
-    devLogin,
     sendEmailLink,
-    completeEmailSignIn,
-    emailLinkSent
+    completeEmailSignIn
   } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -93,73 +89,6 @@ const Auth: React.FC = () => {
       setLoading(false);
     }
   };
-
-  // Handle developer mode login
-  const handleDevLogin = async () => {
-    setLoading(true);
-    try {
-      const success = await devLogin();
-      if (success) {
-        toast({ 
-          title: "Developer Mode", 
-          description: "Developer mode activated. Authentication bypassed.", 
-          variant: "default" 
-        });
-        navigate('/chat');
-      }
-    } catch (error) {
-      console.error("Error in dev login:", error);
-      toast({ 
-        title: "Dev Login Failed", 
-        description: "Could not enable developer mode", 
-        variant: "destructive" 
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Secret dev mode activation with 5 clicks on logo
-  useEffect(() => {
-    let clickCount = 0;
-    let clickTimer: NodeJS.Timeout | null = null;
-    
-    const handleLogoClick = () => {
-      clickCount++;
-      
-      if (clickTimer) {
-        clearTimeout(clickTimer);
-      }
-      
-      if (clickCount >= 5) {
-        setShowDevMode(true);
-        toast({
-          title: "Developer Options",
-          description: "Developer mode options unlocked",
-          variant: "default"
-        });
-        clickCount = 0;
-      }
-      
-      clickTimer = setTimeout(() => {
-        clickCount = 0;
-      }, 3000);
-    };
-    
-    const logoElement = document.querySelector('.animate-float-slow');
-    if (logoElement) {
-      logoElement.addEventListener('click', handleLogoClick);
-    }
-    
-    return () => {
-      if (logoElement) {
-        logoElement.removeEventListener('click', handleLogoClick);
-      }
-      if (clickTimer) {
-        clearTimeout(clickTimer);
-      }
-    };
-  }, [toast]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
@@ -266,9 +195,9 @@ const Auth: React.FC = () => {
     switch (step) {
       case 'email':
         return {
-          icon: <FcGoogle className="h-8 w-8" />,
+          icon: <Mail className="h-8 w-8 text-brand-bordeaux" />,
           title: "התחברות למערכת",
-          description: "התחבר באמצעות Google"
+          description: "התחבר באמצעות אימייל או Google"
         };
       case 'name':
         return {
@@ -317,7 +246,7 @@ const Auth: React.FC = () => {
             </div>
           </CardHeader>
 
-          {/* <CardContent className="p-6 pt-0">
+          <CardContent className="p-6 pt-0">
             {step === 'email' && (
               <form onSubmit={handleEmailSubmit} className="space-y-4" dir="rtl">
                 <div className="space-y-2">
@@ -354,6 +283,27 @@ const Auth: React.FC = () => {
                       <ArrowRight className="mr-2 h-4 w-4" />
                     </>
                   )}
+                </Button>
+                
+                <div className="relative w-full text-center my-4">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300 dark:border-gray-700"></div>
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white dark:bg-brand-darkGray/60 px-2 text-muted-foreground">
+                      או
+                    </span>
+                  </div>
+                </div>
+                
+                <Button
+                  onClick={handleGoogleLogin}
+                  type="button"
+                  className="w-full bg-white text-black border border-gray-300 shadow-md flex items-center justify-center gap-2"
+                  disabled={loading}
+                >
+                  <FcGoogle className="h-5 w-5" />
+                  <span>התחבר עם Google</span>
                 </Button>
               </form>
             )}
@@ -438,45 +388,7 @@ const Auth: React.FC = () => {
                 </div>
               </div>
             )}
-          </CardContent> */}
-
-          <CardFooter className="flex flex-col p-6 pt-0">
-            <div className="flex flex-col w-full mt-4 items-center">
-              {/* <div className="relative w-full text-center my-4">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300 dark:border-gray-700"></div>
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white dark:bg-brand-darkGray px-2 text-muted-foreground">
-                    או
-                  </span>
-                </div>
-              </div> */}
-              
-                <Button
-                onClick={handleGoogleLogin}
-                className="w-full bg-white text-black border border-gray-300 shadow-md flex items-center justify-center gap-2"
-                disabled={loading}
-                >
-                <FcGoogle className="h-5 w-5" />
-                <span>התחבר עם Google</span>
-                </Button>
-            </div>
-
-            {/* Developer mode button (hidden until the logo is clicked 5 times) */}
-            {showDevMode && (
-              <div className="mt-4 w-full">
-                <Button
-                  onClick={handleDevLogin}
-                  className="w-full bg-violet-800 hover:bg-violet-900 text-white border border-violet-900 shadow-md flex items-center justify-center gap-2"
-                  disabled={loading}
-                >
-                  <BugPlay className="h-5 w-5" />
-                  <span>DEV MODE - Skip Authentication</span>
-                </Button>
-              </div>
-            )}
-          </CardFooter>
+          </CardContent>
         </Card>
 
         <p className="text-xs text-center text-muted-foreground mt-6" dir="rtl">
